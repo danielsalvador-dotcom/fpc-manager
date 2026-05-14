@@ -1270,41 +1270,44 @@ function renderConsumption() {
 // ═══════════════════════════════════════════
 function exportTournamentFile() {
   var t=T(); if(!t) return;
+  /* Each event already has a unique ID (uid). Export includes all events with their IDs.
+     The receiver uses these IDs to know exactly which events are new. */
   var obj={
-    fpc_file: true, versao:'1.0',
-    torneio: t.name, data: t.date,
-    dealer: S.dealerName||'?',
-    exportadoEm: new Date().toISOString(),
-    configuracoes: t.settings,
-    jogadores: t.players.map(function(p){
+    fpc_file:true, versao:'2.0',
+    torneio:t.name, data:t.date,
+    dealer:S.dealerName||'?',
+    exportadoEm:new Date().toISOString(),
+    configuracoes:t.settings,
+    jogadores:t.players.map(function(p){
       return {
         nome:p.name, buyInPaid:p.buyInPaid,
-        rebuys:p.rebuys, rebuysPaid:p.rebuysPaid,
+        rebuys:{common:p.rebuys.common, bonus:p.rebuys.bonus},
+        rebuysPaid:p.rebuysPaid,
         addon:p.addon, addonPaid:p.addonPaid,
-        eliminated:p.eliminated, drinks:p.drinks, drinksPaid:p.drinksPaid
+        eliminated:p.eliminated, drinks:p.drinks, drinksPaid:p.drinksPaid,
+        /* Export individual rebuy events so receiver can count new ones */
+        rebuyEvents: t.events.filter(function(ev){
+          return (ev.type==='rebuy_common'||ev.type==='rebuy_bonus')&&ev.data&&ev.data.pid===p.id;
+        }).map(function(ev){return {id:ev.id,type:ev.type,count:ev.data.count,at:ev.at,ts:ev.ts,dealer:ev.dealer||S.dealerName};})
       };
     }),
-    eventos: t.events,
-    rankingComHorario: (function(){
-      var total=t.players.length;
-      return t.ranking.map(function(pid){
-        var p=t.players.find(function(x){return x.id===pid;});
-        var evs=t.events.filter(function(e){return e.type==='final_elim'&&e.data&&e.data.pid===pid;});
-        var at=evs.length?evs[evs.length-1].at:0;
-        var ts=evs.length?evs[evs.length-1].ts:'';
-        return {nome:p?p.name:'?', at:at, ts:ts};
-      });
-    })(),
-    melhorMao: t.bestHand||null,
-    placePrizes: t.placePrizes||{},
-    extraPrizes: t.extraPrizes||[],
-    activePlaces: t.activePlaces||[1,2,3,4]
+    killEvents: t.events.filter(function(ev){return ev.type==='kill';}),
+    addonEvents: t.events.filter(function(ev){return ev.type==='addon';}),
+    drinkEvents: t.events.filter(function(ev){return ev.type==='drink';}),
+    finalElimEvents: t.events.filter(function(ev){return ev.type==='final_elim';}),
+    rankingComHorario: t.ranking.map(function(pid){
+      var p=t.players.find(function(x){return x.id===pid;});
+      var evs=t.events.filter(function(e){return e.type==='final_elim'&&e.data&&e.data.pid===pid;});
+      return {nome:p?p.name:'?', at:evs.length?evs[evs.length-1].at:0, ts:evs.length?evs[evs.length-1].ts:''};
+    }),
+    melhorMao:t.bestHand||null
   };
   var blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});
   var url=URL.createObjectURL(blob);
   var a=document.createElement('a');
   var safe=(t.name||'torneio').replace(/[^a-z0-9]/gi,'_').toLowerCase();
-  a.href=url; a.download='FPC_'+safe+'_'+(S.dealerName||'dealer')+'.json';
+  a.href=url;
+  a.download='FPC_'+safe+'_'+(S.dealerName||'dealer')+'.json';
   document.body.appendChild(a); a.click();
   document.body.removeChild(a); URL.revokeObjectURL(url);
 }
@@ -1322,161 +1325,216 @@ function importTournamentFile(file) {
   reader.readAsText(file);
 }
 
+function undoMerge() {
+  var t=T(); if(!t||!t._undoState) return;
+  if(!confirm('Desfazer a \u00faltima mesclagem?\nTodos os dados importados ser\u00e3o revertidos.')) return;
+  var undo=JSON.parse(JSON.stringify(t._undoState));
+  undo._undoState=null;
+  S.tournaments[S.activeId]=undo;
+  save();
+  alert('\u2705 Desfeito! Dados revertidos ao estado anterior.');
+  renderSettings();
+}
+
 function mergeTournament(ext) {
   var t=T(); if(!t) return;
-  var log=[];
   var extDealer=ext.dealer||'?';
 
-  /* ── POKER HAND RANKINGS (lower index = stronger) ── */
+  /* ── SNAPSHOT para UNDO ── */
+  var snapshot=JSON.parse(JSON.stringify(t));
+  snapshot._undoState=null;
+  t._undoState=snapshot;
+
+  /* ── Inicializa controle de IDs já importados ── */
+  if(!t.importedEventIds) t.importedEventIds={};
+  if(!t.importedFiles)    t.importedFiles=[];
+  if(!t.importedRebuyIds) t.importedRebuyIds={};
+
+  var log=[], newCount=0;
   var HAND_RANK=['Royal Flush','Straight Flush','Quadra','Full House','Flush','Sequ\u00eancia','Trinca','Dois Pares','Par'];
 
-  /* ── JOGADORES: match by name, SUM everything ── */
-  ext.jogadores.forEach(function(ep){
-    var nameLow=ep.nome.toLowerCase();
-    var local=t.players.find(function(p){return p.name.toLowerCase()===nameLow;});
-    if(!local){
-      log.push('\u26a0\ufe0f Jogador n\u00e3o encontrado localmente: '+ep.nome);
-      return;
-    }
-    /* Buy-in: if either paid = paid */
-    if(ep.buyInPaid && !local.buyInPaid){ local.buyInPaid=true; log.push('\u2705 Buy-in pago: '+local.name); }
+  /* ── JOGADORES: setup inicial ou atualiza pagamentos ── */
+  var localEmpty=(t.players.length===0);
+  if(localEmpty){
+    log.push('\ud83d\udc65 Torneio vazio \u2014 copiando jogadores...');
+    (ext.jogadores||[]).forEach(function(ep){
+      var newId=t.nextPid++;
+      t.players.push({
+        id:newId, name:ep.nome,
+        buyInPaid:ep.buyInPaid||false,
+        rebuys:{common:0,bonus:0},
+        rebuysPaid:{common:false,bonus:false},
+        addon:false, addonPaid:false, eliminated:false, drinks:{}, drinksPaid:false
+      });
+      log.push('  + '+ep.nome);
+    });
+    if(ext.configuracoes) t.settings=JSON.parse(JSON.stringify(ext.configuracoes));
+    if(!t.name||t.name==='FPC \u2013 Quinta Feira') t.name=ext.torneio;
+    if(!t.date) t.date=ext.data;
+  } else {
+    /* Atualiza apenas pagamentos (OR) */
+    (ext.jogadores||[]).forEach(function(ep){
+      var local=t.players.find(function(p){return p.name.toLowerCase()===ep.nome.toLowerCase();});
+      if(!local) return;
+      if(ep.buyInPaid&&!local.buyInPaid){local.buyInPaid=true;log.push('\u2705 Buy-in pago: '+local.name);}
+      if(ep.rebuysPaid&&ep.rebuysPaid.common) local.rebuysPaid.common=true;
+      if(ep.rebuysPaid&&ep.rebuysPaid.bonus)  local.rebuysPaid.bonus=true;
+      if(ep.addonPaid&&!local.addonPaid){local.addonPaid=true;log.push('\u2705 Add-on pago: '+local.name);}
+      if(ep.drinksPaid&&!local.drinksPaid){local.drinksPaid=true;}
+    });
+  }
 
-    /* Rebuys: SUM */
-    if((ep.rebuys.common||0)>0){
-      local.rebuys.common+=(ep.rebuys.common||0);
-      log.push('+ '+ep.rebuys.common+' re-buy(s) comum: '+local.name);
-    }
-    if((ep.rebuys.bonus||0)>0){
-      local.rebuys.bonus+=(ep.rebuys.bonus||0);
-      log.push('+ '+ep.rebuys.bonus+' re-buy(s) b\u00f4nus: '+local.name);
-    }
+  /* ─────────────────────────────────────────────
+     CORE: importar somente eventos com IDs novos
+     Cada evento tem um ID único gerado no momento
+     em que foi registrado. Se o ID já existe no
+     t.importedEventIds, é porque já foi importado
+     antes — ignora. Caso contrário, processa e
+     registra o ID para não importar de novo.
+  ───────────────────────────────────────────── */
 
-    /* Payments: OR */
-    if(ep.rebuysPaid&&ep.rebuysPaid.common) local.rebuysPaid.common=true;
-    if(ep.rebuysPaid&&ep.rebuysPaid.bonus)  local.rebuysPaid.bonus=true;
+  function isNewEvent(evId) {
+    if(!evId) return false;
+    /* Also check if it's already in our own events */
+    if(t.events.find(function(e){return e.id===evId;})) return false;
+    if(t.importedEventIds[evId]) return false;
+    return true;
+  }
 
-    /* Add-on: OR (if either registered, player took it) */
-    if(ep.addon && !local.addon){ local.addon=true; log.push('+ Add-on: '+local.name); }
-    if(ep.addonPaid) local.addonPaid=true;
+  function markImported(evId) {
+    t.importedEventIds[evId]=true;
+  }
 
-    /* Consumação: SUM quantities */
-    Object.keys(ep.drinks||{}).forEach(function(iid){
-      if((ep.drinks[iid]||0)>0){
-        local.drinks[iid]=(local.drinks[iid]||0)+(ep.drinks[iid]||0);
+  /* ── REBUYS: only new rebuy events by ID ── */
+  (ext.jogadores||[]).forEach(function(ep){
+    var local=t.players.find(function(p){return p.name.toLowerCase()===ep.nome.toLowerCase();});
+    if(!local) return;
+    (ep.rebuyEvents||[]).forEach(function(rev){
+      if(!isNewEvent(rev.id)) return;
+      /* New rebuy event — apply it */
+      var count=rev.count||1;
+      if(rev.type==='rebuy_common'){
+        local.rebuys.common+=count;
+        log.push('+ '+count+' rebuy(s) comum: '+local.name+' (\u23f0 '+rev.ts+')');
+      } else if(rev.type==='rebuy_bonus'){
+        local.rebuys.bonus+=count;
+        log.push('+ '+count+' rebuy(s) b\u00f4nus: '+local.name+' (\u23f0 '+rev.ts+')');
       }
+      /* Log this event to our own events list */
+      t.events.push({id:rev.id,type:rev.type,data:{pid:local.id,count:count,name:local.name},ts:rev.ts,at:rev.at,dealer:rev.dealer||extDealer});
+      markImported(rev.id);
+      newCount++;
     });
-    if(ep.drinksPaid) local.drinksPaid=true;
   });
 
-  /* ── EVENTOS: merge kills avoiding duplicates ── */
-  /* Only import kill events — other events are derived from player state */
-  var existingKills=t.events.filter(function(ev){return ev.type==='kill';});
-
-  var killsAdded=0;
-  (ext.eventos||[]).filter(function(ev){return ev.type==='kill';}).forEach(function(ev){
-    /* Duplicate check: same predator + same prey + within 120s */
-    var isDup=existingKills.some(function(local){
-      if(!ev.data||!local.data) return false;
-      var samePred=(local.data.predName||'').toLowerCase()===(ev.data.predName||'').toLowerCase();
-      var samePrey=(local.data.preyName||'').toLowerCase()===(ev.data.preyName||'').toLowerCase();
-      var dt=Math.abs((local.at||0)-(ev.at||0));
-      return samePred && samePrey && dt<120000;
-    });
-    if(!isDup){
-      var newEv=JSON.parse(JSON.stringify(ev));
-      newEv.dealer=extDealer;
-      t.events.push(newEv);
-      existingKills.push(newEv);
-      killsAdded++;
+  /* ── ADD-ONS: only new by ID ── */
+  (ext.addonEvents||[]).forEach(function(ev){
+    if(!isNewEvent(ev.id)) return;
+    var local=t.players.find(function(p){return p.name.toLowerCase()===(ev.data&&ev.data.name||'').toLowerCase();});
+    if(local&&ev.data&&ev.data.taken&&!local.addon){
+      local.addon=true;
+      log.push('+ Add-on: '+local.name+' (\u23f0 '+ev.ts+')');
+      t.events.push(JSON.parse(JSON.stringify(ev)));
+      markImported(ev.id);
+      newCount++;
+    } else {
+      markImported(ev.id); /* mark even if skipped to avoid reprocessing */
     }
   });
-  if(killsAdded>0) log.push('+ '+killsAdded+' kill(s) adicionado(s)');
+
+  /* ── KILLS: only new by ID ── */
+  (ext.killEvents||[]).forEach(function(ev){
+    if(!isNewEvent(ev.id)) return;
+    t.events.push(JSON.parse(JSON.stringify(ev)));
+    markImported(ev.id);
+    log.push('\ud83d\udc80 Kill: '+(ev.data&&ev.data.predName)+' \u2192 '+(ev.data&&ev.data.preyName)+' (\u23f0 '+ev.ts+')');
+    newCount++;
+  });
+
+  /* ── CONSUMAÇÃO: only new drink events by ID ── */
+  (ext.drinkEvents||[]).forEach(function(ev){
+    if(!isNewEvent(ev.id)) return;
+    /* Apply drink quantity */
+    var local=t.players.find(function(p){return p.id===(ev.data&&ev.data.pid);});
+    if(!local){
+      /* Try by name if IDs differ */
+      local=t.players.find(function(p){return p.name.toLowerCase()===(ev.data&&ev.data.name||'').toLowerCase();});
+    }
+    if(local&&ev.data&&ev.data.itemId&&ev.data.qty){
+      local.drinks[ev.data.itemId]=(local.drinks[ev.data.itemId]||0)+ev.data.qty;
+    }
+    t.events.push(JSON.parse(JSON.stringify(ev)));
+    markImported(ev.id);
+    newCount++;
+  });
 
   /* ── RANKING POR HORÁRIO ── */
-  /*
-   * Logic: collect ALL final_elim events from both dealers.
-   * Each event has a player name + timestamp (at).
-   * If two events refer to the same player → same elimination → keep earliest timestamp.
-   * Sort ALL eliminations by timestamp ascending → first out = last place (highest number).
-   * The player NOT in the elimination list = winner (1st place).
-   */
-  var elimMap={}; /* key: nome.toLowerCase() → {nome, at, ts} */
-
-  /* From local events */
+  var elimMap={};
   t.events.filter(function(ev){return ev.type==='final_elim';}).forEach(function(ev){
-    var nome=(ev.data&&ev.data.name)||'';
-    if(!nome) return;
+    var nome=(ev.data&&ev.data.name)||''; if(!nome) return;
     var key=nome.toLowerCase();
-    /* If already exists, keep the EARLIEST timestamp (first registered = earlier event) */
-    if(!elimMap[key] || ev.at < elimMap[key].at){
-      elimMap[key]={nome:nome, at:ev.at||0, ts:ev.ts||''};
-    }
+    if(!elimMap[key]||ev.at<elimMap[key].at) elimMap[key]={nome:nome,at:ev.at||0,ts:ev.ts||''};
   });
-
-  /* From external ranking (has timestamps) */
   (ext.rankingComHorario||[]).forEach(function(er){
     var key=er.nome.toLowerCase();
-    if(!elimMap[key]){
-      elimMap[key]={nome:er.nome, at:er.at||0, ts:er.ts||''};
-    } else if(er.at && er.at < elimMap[key].at){
-      /* External has earlier timestamp — trust it */
-      elimMap[key].at=er.at;
-      elimMap[key].ts=er.ts||elimMap[key].ts;
-    }
+    if(!elimMap[key]) elimMap[key]={nome:er.nome,at:er.at||0,ts:er.ts||''};
+    else if(er.at&&er.at<elimMap[key].at){elimMap[key].at=er.at;elimMap[key].ts=er.ts||elimMap[key].ts;}
+  });
+  /* Import final_elim events that are new */
+  (ext.finalElimEvents||[]).forEach(function(ev){
+    if(!isNewEvent(ev.id)) return;
+    var nome=(ev.data&&ev.data.name)||''; if(!nome) return;
+    var key=nome.toLowerCase();
+    if(!elimMap[key]||ev.at<elimMap[key].at) elimMap[key]={nome:nome,at:ev.at||0,ts:ev.ts||''};
+    t.events.push(JSON.parse(JSON.stringify(ev)));
+    markImported(ev.id);
   });
 
-  /* Sort by timestamp ascending: first eliminated = highest place number */
   var sortedElims=Object.values(elimMap).sort(function(a,b){return a.at-b.at;});
-
-  /* Rebuild t.ranking (array of pids, first = first eliminated = last place) */
   t.ranking=[];
   sortedElims.forEach(function(elim){
-    var nameLow=elim.nome.toLowerCase();
-    var p=t.players.find(function(x){return x.name.toLowerCase()===nameLow;});
-    if(p && t.ranking.indexOf(p.id)<0){
-      t.ranking.push(p.id);
-      p.eliminated=true;
-    }
+    var p=t.players.find(function(x){return x.name.toLowerCase()===elim.nome.toLowerCase();});
+    if(p&&t.ranking.indexOf(p.id)<0){t.ranking.push(p.id);p.eliminated=true;}
   });
 
-  var winner=t.players.find(function(p){return t.ranking.indexOf(p.id)<0;});
-  log.push('\ud83c\udfc6 Ranking recalculado por hor\u00e1rio ('+sortedElims.length+' elimina\u00e7\u00f5es)');
-  if(winner) log.push('   Campe\u00e3o: '+winner.name);
-
-  /* Show ranking summary */
   var total=t.players.length;
-  sortedElims.forEach(function(elim,i){
-    var place=total-i;
-    log.push('   '+place+'\u00ba '+elim.nome+' (\u23f0 '+( elim.ts||'??:??')+')');
-  });
+  if(sortedElims.length){
+    log.push('\ud83c\udfc6 Ranking por hor\u00e1rio:');
+    sortedElims.forEach(function(elim,i){
+      log.push('   '+(total-i)+'\u00ba '+elim.nome+' \u23f0 '+(elim.ts||'??:??'));
+    });
+    var winner=t.players.find(function(p){return t.ranking.indexOf(p.id)<0;});
+    if(winner) log.push('   1\u00ba \ud83c\udfc6 '+winner.name);
+  }
 
-  /* ── MELHOR MÃO: compare by poker rules ── */
+  /* ── MELHOR MÃO ── */
   if(ext.melhorMao){
     if(!t.bestHand){
       t.bestHand=ext.melhorMao;
-      log.push('\u2660\ufe0f Melhor m\u00e3o importada: '+ext.melhorMao.handType+' ('+ext.melhorMao.playerName+')');
+      log.push('\u2660\ufe0f Melhor m\u00e3o: '+ext.melhorMao.handType+' ('+ext.melhorMao.playerName+')');
     } else {
-      var localIdx=HAND_RANK.indexOf(t.bestHand.handType);
-      var extIdx=HAND_RANK.indexOf(ext.melhorMao.handType);
-      if(localIdx<0) localIdx=99;
-      if(extIdx<0)   extIdx=99;
-      if(extIdx < localIdx){
-        /* External hand is stronger */
-        t.bestHand=ext.melhorMao;
-        log.push('\u2660\ufe0f Melhor m\u00e3o atualizada: '+ext.melhorMao.handType+' ('+ext.melhorMao.playerName+') \u2014 m\u00e3o mais forte');
-      } else {
-        log.push('\u2660\ufe0f Melhor m\u00e3o mantida: '+t.bestHand.handType+' ('+t.bestHand.playerName+')');
-      }
+      var li=HAND_RANK.indexOf(t.bestHand.handType); if(li<0) li=99;
+      var ei=HAND_RANK.indexOf(ext.melhorMao.handType); if(ei<0) ei=99;
+      if(ei<li){t.bestHand=ext.melhorMao;log.push('\u2660\ufe0f Melhor m\u00e3o atualizada: '+ext.melhorMao.handType);}
     }
   }
 
+  /* ── LOG IMPORT ── */
+  t.importedFiles.push({
+    dealer:extDealer,
+    exportadoEm:ext.exportadoEm||'',
+    importedAt:new Date().toLocaleString('pt-BR'),
+    novosEventos:newCount
+  });
+
   save();
 
-  /* ── RESULT ALERT ── */
-  var msg='\u2705 Mesclado com sucesso!\n';
-  msg+='Dealer: '+extDealer+' | Data: '+(ext.data||'?')+'\n';
-  msg+='\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n';
+  var msg='\u2705 Mesclagem conclu\u00edda!\n';
+  msg+='Dealer: '+extDealer+' | '+ext.data+'\n';
+  msg+=newCount+' evento(s) novo(s) adicionado(s)\n';
+  msg+='________________________\n';
   msg+=log.join('\n');
+  msg+='\n\nUse \u21a9 Desfazer em Config. se precisar reverter.';
   alert(msg);
   renderSettings();
 }
@@ -1513,9 +1571,31 @@ function renderSettings() {
   h+='<div style="font-size:12px;color:var(--muted);line-height:1.7">';
   h+='1. Cada dealer toca em <strong style="color:var(--cream)">Exportar</strong> e manda o arquivo no WhatsApp<br>';
   h+='2. Cada um abre o arquivo recebido e toca em <strong style="color:var(--cream)">Importar</strong><br>';
-  h+='3. O app mescla tudo: rebuys somados, kills unidos, classifica&#231;&#227;o pelo hor&#225;rio de elimina&#231;&#227;o<br>';
-  h+='4. Resultado final id&#234;ntico nos dois celulares &#10003;';
+  h+='3. O app mescla: rebuys somados, kills unidos, ranking pelo horário exato<br>';
+  h+='4. Pode exportar e importar quantas vezes quiser — arquivos já importados são detectados<br>';
+  h+='5. Se der errado, toque em <strong style="color:var(--danger)">↩ Desfazer</strong> para reverter';
   h+='</div></div>';
+
+  /* Undo button — only show if there's a snapshot */
+  if(t._undoState){
+    h+='<button id="btn-undo-merge" style="width:100%;margin-top:10px;padding:14px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--fn);background:#e0484822;border:2px solid #e0484888;color:var(--danger)">';
+    h+='↩ Desfazer última mesclagem</button>';
+  }
+
+  /* Import history */
+  if(t.importedFiles&&t.importedFiles.length){
+    h+='<div style="margin-top:12px">';
+    h+='<div style="font-size:11px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px">Histórico de imports:</div>';
+    t.importedFiles.slice().reverse().forEach(function(f){
+      h+='<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--s2);border-radius:8px;margin-bottom:4px;border:1px solid var(--border)">';
+      h+='<span style="font-size:15px">✅</span>';
+      h+='<div style="flex:1"><div style="font-size:13px;font-weight:600">'+esc(f.dealer)+'</div>';
+      h+='<div style="font-size:11px;color:var(--muted)">'+(f.importedAt||'')+'</div></div>';
+      h+='</div>';
+    });
+    h+='</div>';
+  }
+
   h+='</div>';
 
   /* ── TORNEIO ATUAL ── */
@@ -1547,6 +1627,9 @@ function renderSettings() {
   document.getElementById('set-dealer').addEventListener('input',function(){S.dealerName=this.value;save();updateHeader();});
 
   document.getElementById('btn-exp-file').addEventListener('click',function(){exportTournamentFile();});
+  if(document.getElementById('btn-undo-merge')){
+    document.getElementById('btn-undo-merge').addEventListener('click',function(){undoMerge();});
+  }
 
   document.getElementById('imp-file').addEventListener('change',function(){
     if(this.files&&this.files[0]) importTournamentFile(this.files[0]);
