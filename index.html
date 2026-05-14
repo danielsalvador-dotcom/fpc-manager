@@ -211,14 +211,28 @@ html,body{height:100%;background:var(--bg);color:var(--cream);font-family:var(--
 <!-- EXPORT -->
 <div id="exp-bg" class="hidden">
   <div class="exp-box">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-      <div style="font-family:var(--fs);font-size:18px;color:var(--gold)">Exportar Log</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <div style="font-family:var(--fs);font-size:18px;color:var(--gold)">&#128228; Exportar</div>
       <button id="btn-close-exp" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer">&#10005;</button>
     </div>
-    <p style="font-size:13px;color:var(--muted);margin-bottom:4px">Timestamps para comparar com o outro dealer e montar a classifica&#231;&#227;o.</p>
+    <!-- Tab buttons -->
+    <div style="display:flex;gap:6px;margin-bottom:14px">
+      <button id="exp-tab-wpp" onclick="switchExpTab('wpp')"
+        style="flex:1;padding:9px 6px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--fn);background:var(--success);color:#fff;border:none">
+        &#128241; WhatsApp
+      </button>
+      <button id="exp-tab-json" onclick="switchExpTab('json')"
+        style="flex:1;padding:9px 6px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--fn);background:var(--s2);color:var(--muted);border:1px solid var(--border)">
+        &#129302; Para Claude
+      </button>
+    </div>
+    <!-- Description -->
+    <p id="exp-desc" style="font-size:12px;color:var(--muted);margin-bottom:8px">
+      Texto limpo para comparar com o Alysson antes de me mandar.
+    </p>
     <div class="exp-txt" id="exp-txt"></div>
-    <div style="display:flex;gap:8px">
-      <button class="btn-gold" id="btn-copy-exp" style="flex:1">Copiar para WhatsApp</button>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button class="btn-gold" id="btn-copy-exp" style="flex:1">&#128203; Copiar</button>
       <button class="btn-ghost" id="btn-close-exp2" style="flex:1">Fechar</button>
     </div>
   </div>
@@ -277,15 +291,61 @@ function esc(s) {
   return String(s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-function beep(f,d,v) {
+function getAC() {
+  if(!window._fpcAC) window._fpcAC=new(window.AudioContext||window.webkitAudioContext)();
+  return window._fpcAC;
+}
+function beep(f,d,v,type) {
   try {
-    var ac = new (window.AudioContext||window.webkitAudioContext)();
-    var o = ac.createOscillator(), g = ac.createGain();
+    var ac=getAC();
+    var o=ac.createOscillator(), g=ac.createGain();
     o.connect(g); g.connect(ac.destination);
-    o.frequency.value = f||880; o.type = 'sine';
+    o.frequency.value=f||880; o.type=type||'sine';
     g.gain.setValueAtTime(v||0.3, ac.currentTime);
     g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+(d||0.4));
     o.start(); o.stop(ac.currentTime+(d||0.4));
+  } catch(e) {}
+}
+function playCountdown(n) {
+  /* Loud tick for last 5 seconds — pitch rises as it gets closer to zero */
+  try {
+    var ac=getAC();
+    var freq = 400 + (5-n)*80; /* 400Hz at 5s, 760Hz at 1s */
+    var vol  = 0.5 + (5-n)*0.08; /* gets louder too */
+    var o=ac.createOscillator(), g=ac.createGain();
+    o.connect(g); g.connect(ac.destination);
+    o.type='square'; o.frequency.value=freq;
+    g.gain.setValueAtTime(vol, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+0.12);
+    o.start(); o.stop(ac.currentTime+0.12);
+  } catch(e) {}
+}
+function playTimeUp() {
+  /* Descending "acabou" — three falling tones */
+  try {
+    var ac=getAC();
+    [[900,0,0.7],[700,0.18,0.6],[500,0.36,0.8]].forEach(function(cfg){
+      var o=ac.createOscillator(), g=ac.createGain();
+      o.connect(g); g.connect(ac.destination);
+      o.type='sine'; o.frequency.value=cfg[0];
+      g.gain.setValueAtTime(cfg[2], ac.currentTime+cfg[1]);
+      g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+cfg[1]+0.22);
+      o.start(ac.currentTime+cfg[1]); o.stop(ac.currentTime+cfg[1]+0.25);
+    });
+  } catch(e) {}
+}
+function playNewRound() {
+  /* Ascending "recomeçou" — three rising tones */
+  try {
+    var ac=getAC();
+    [[500,0,0.5],[700,0.18,0.55],[1000,0.36,0.7]].forEach(function(cfg){
+      var o=ac.createOscillator(), g=ac.createGain();
+      o.connect(g); g.connect(ac.destination);
+      o.type='triangle'; o.frequency.value=cfg[0];
+      g.gain.setValueAtTime(cfg[2], ac.currentTime+cfg[1]);
+      g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+cfg[1]+0.22);
+      o.start(ac.currentTime+cfg[1]); o.stop(ac.currentTime+cfg[1]+0.25);
+    });
   } catch(e) {}
 }
 
@@ -374,10 +434,13 @@ function finalEliminate(pid) {
 function timerTick() {
   S.timer.val--;
   if(S.timer.val<=0) {
-    beep(880,.2,.4); setTimeout(function(){beep(1100,.2,.4);},280); setTimeout(function(){beep(880,.5,.5);},560);
+    playTimeUp();                        /* descending "acabou" */
+    setTimeout(function(){
+      playNewRound();                    /* ascending "recomeçou" after 0.7s */
+    }, 700);
     S.timer.val=S.timer.max;
   } else if(S.timer.val<=5) {
-    beep(440,.08,.2);
+    playCountdown(S.timer.val);         /* loud rising tick */
   }
   updateTimerUI();
 }
@@ -399,7 +462,7 @@ function updateTimerUI() {
 function updateTimerBtn() {
   var btn=document.getElementById('btn-go');
   if(!btn) return;
-  btn.textContent=S.timer.on?'&#9208; Pausar':'&#9654; Iniciar';
+  btn.textContent=S.timer.on?'Pausar':'Iniciar';
   if(S.timer.on) btn.classList.add('on'); else btn.classList.remove('on');
 }
 
@@ -441,7 +504,7 @@ function renderTimer() {
   h+='<div class="t-hint">'+(S.timer.on?'rodando...':'toque p/ editar')+'</div>';
   h+='</div></div>';
   h+='<div class="t-ctrl">';
-  h+='<button id="btn-go" class="btn-go'+(S.timer.on?' on':'')+'">'+( S.timer.on?'&#9208; Pausar':'&#9654; Iniciar')+'</button>';
+  h+='<button id="btn-go" class="btn-go'+(S.timer.on?' on':'')+'">'+( S.timer.on?'Pausar':'Iniciar')+'</button>';
   h+='<button class="btn-rst" id="btn-rst">&#8635;</button>';
   h+='</div>';
   h+='<div style="width:100%">';
@@ -634,10 +697,32 @@ function refreshBal() {
   var clr=bal>=0?'var(--success)':'var(--danger)';
   if(lbl) lbl.style.color=clr; if(val) {val.style.color=clr;val.textContent=(bal>=0?'+':'')+brl(bal);}
 }
+function plyrDebt(p) {
+  var t=T(); if(!t) return 0;
+  var cfg=t.settings, its=t.items;
+  var tot=cfg.buyIn+p.rebuys.common*cfg.rebuyCost+p.rebuys.bonus*cfg.rebuyBonusCost+(p.addon?cfg.addonCost:0)+its.reduce(function(s,it){return s+(p.drinks[it.id]||0)*it.p;},0);
+  var paid=(p.buyInPaid?cfg.buyIn:0)+(p.rebuysPaid.common?p.rebuys.common*cfg.rebuyCost:0)+(p.rebuysPaid.bonus?p.rebuys.bonus*cfg.rebuyBonusCost:0)+(p.addonPaid?cfg.addonCost:0)+(p.drinksPaid?its.reduce(function(s,it){return s+(p.drinks[it.id]||0)*it.p;},0):0);
+  return Math.max(0, tot-paid);
+}
+
+function getPlayerAtPlace(place) {
+  var t=T(); if(!t) return null;
+  var ps=t.players, rk=t.ranking;
+  if(place===1) return ps.find(function(p){return rk.indexOf(p.id)<0;}) || null;
+  var reversed=rk.slice().reverse();
+  var p=ps.find(function(x){return x.id===reversed[place-2];});
+  return p || null;
+}
+
 function renderFinance() {
   var t=T(); if(!t) return;
+  if(!t.placePrizes)  t.placePrizes  = {p1:'',p2:'',p3:'',p4:''};
+  if(!t.activePlaces) t.activePlaces = [1,2,3,4];
+  if(!t.extraPrizes)  t.extraPrizes  = [];
   var x=calcTotals(), cfg=t.settings, ps=t.players, fin=t.financials;
   var bal=x.totRev-(+fin.prizes||0)-(+fin.costs||0)-(+fin.expenses||0);
+
+  /* ── RESUMO ── */
   var h='<div class="pad">';
   h+='<div class="sc"><div class="sc-title">&#128202; Resumo</div><div class="g2">';
   h+='<div class="sb"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Buy-ins</div><div class="mono" style="font-size:16px;font-weight:700">'+brl(x.totBI)+'</div><div style="font-size:10px;color:var(--muted)">'+ps.filter(function(p){return p.buyInPaid;}).length+' jog.</div></div>';
@@ -647,35 +732,231 @@ function renderFinance() {
   h+='<div class="sb"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Consuma&#231;&#227;o</div><div class="mono" style="font-size:16px;font-weight:700">'+brl(x.totDR)+'</div></div>';
   h+='<div class="sb" style="background:#c9a22716;border-color:var(--gold)44"><div style="font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:1px">ARRECADADO</div><div class="mono tg" style="font-size:16px;font-weight:700">'+brl(x.totRev)+'</div></div>';
   h+='</div></div>';
+
+  /* ── DESPESAS ── */
   h+='<div class="sc"><div class="sc-title">&#128184; Despesas</div>';
-  [['Premia&#231;&#227;o','prizes'],['Custos operacionais','costs'],['Outras despesas','expenses']].forEach(function(pair){
-    h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">';
-    h+='<div style="font-size:13px;color:var(--muted);flex:1">'+pair[0]+' (R$)</div>';
-    h+='<input class="fi" type="number" data-finkey="'+pair[1]+'" value="'+fin[pair[1]]+'" style="width:90px;padding:8px 10px;font-size:13px">';
+  [['Premia&#231;&#227;o total (R$)','prizes'],['Custos operacionais (R$)','costs'],['Outras despesas (R$)','expenses']].forEach(function(pair){
+    h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="font-size:13px;color:var(--muted);flex:1">'+pair[0]+'</div><input class="fi" type="number" data-finkey="'+pair[1]+'" value="'+fin[pair[1]]+'" style="width:90px;padding:8px 10px;font-size:13px"></div>';
+  });
+  h+='<div id="bal-box" class="bal '+(bal>=0?'pos':'neg')+'"><span id="bal-lbl" style="font-weight:700;color:'+(bal>=0?'var(--success)':'var(--danger)')+'">Balan&#231;o Final</span><span id="bal-val" class="mono" style="font-size:20px;font-weight:700;color:'+(bal>=0?'var(--success)':'var(--danger)')+'">'+(bal>=0?'+':'')+brl(bal)+'</span></div>';
+  h+='</div>';
+
+  /* ── PREMIAÇÃO LUGARES FIXOS ── */
+  var medals=[
+    {key:'p1', icon:'&#129351;', label:'1&#186; Lugar', place:1},
+    {key:'p2', icon:'&#129352;', label:'2&#186; Lugar', place:2},
+    {key:'p3', icon:'&#129353;', label:'3&#186; Lugar', place:3},
+    {key:'p4', icon:'&#127885;', label:'4&#186; Lugar', place:4}
+  ];
+  var pp=t.placePrizes, ap=t.activePlaces;
+
+  h+='<div class="sc"><div class="sc-title">&#127942; Premia&#231;&#227;o por Lugar</div>';
+  h+='<div style="font-size:11px;color:var(--muted);margin-bottom:12px">Linkado ao Rank. Use &#10005; para remover um lugar e readdicion&#225;-lo pelo bot&#227;o abaixo.</div>';
+
+  /* Active place rows */
+  medals.forEach(function(m){
+    if(ap.indexOf(m.place)<0) return; // hidden
+    var player=getPlayerAtPlace(m.place);
+    var pName=player
+      ?'<span style="color:var(--cream);font-weight:600">'+esc(player.name)+'</span>'
+      :'<span style="color:var(--muted);font-style:italic">n&#227;o definido no Rank</span>';
+    h+='<div style="display:flex;align-items:center;gap:10px;padding:11px 12px;background:var(--s2);border-radius:10px;margin-bottom:8px;border:1px solid var(--border)">';
+    h+='<div style="font-size:22px;flex-shrink:0">'+m.icon+'</div>';
+    h+='<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;color:var(--gold)">'+m.label+'</div>';
+    h+='<div style="font-size:12px;margin-top:2px">&#128100; '+pName+'</div></div>';
+    h+='<input class="fi" type="number" data-pp="'+m.key+'" value="'+esc(String(pp[m.key]||''))+'" placeholder="R$" style="width:84px;padding:9px 6px;font-size:14px;font-weight:700;text-align:right;flex-shrink:0">';
+    h+='<button data-place-rem="'+m.place+'" style="background:#e0484822;border:1px solid #e0484844;color:var(--danger);border-radius:8px;padding:8px 10px;cursor:pointer;font-size:16px;flex-shrink:0" title="Remover">&#10005;</button>';
     h+='</div>';
   });
-  h+='<div id="bal-box" class="bal '+(bal>=0?'pos':'neg')+'">';
-  h+='<span id="bal-lbl" style="font-weight:700;color:'+(bal>=0?'var(--success)':'var(--danger)')+'">Balan&#231;o Final</span>';
-  h+='<span id="bal-val" class="mono" style="font-size:20px;font-weight:700;color:'+(bal>=0?'var(--success)':'var(--danger)')+'">'+(bal>=0?'+':'')+brl(bal)+'</span>';
-  h+='</div></div>';
-  h+='<div class="sc"><div class="sc-title">&#128100; Por Jogador</div>';
+
+  /* Buttons to re-add removed places */
+  var removed=medals.filter(function(m){return ap.indexOf(m.place)<0;});
+  if(removed.length){
+    h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">';
+    removed.forEach(function(m){
+      h+='<button data-place-add="'+m.place+'" style="background:var(--s2);border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px;font-weight:600;font-family:var(--fn)">+ '+m.icon+' '+m.label+'</button>';
+    });
+    h+='</div>';
+  }
+  h+='</div>';
+
+  /* ── PRÊMIOS EXTRAS ── */
+  h+='<div class="sc"><div class="sc-title">&#127775; Pr&#234;mios Extras</div>';
+  h+='<div style="font-size:11px;color:var(--muted);margin-bottom:12px">Personalize: Chip Leader, MVP, Melhor M&#227;o, etc.</div>';
+
+  if(!t.extraPrizes.length){
+    h+='<div style="text-align:center;color:var(--muted);font-size:13px;padding:8px 0 14px">Nenhum pr&#234;mio extra ainda</div>';
+  }
+
+  t.extraPrizes.forEach(function(pz,i){
+    var selP=pz.pid?ps.find(function(p){return p.id===pz.pid;}):null;
+    var done=pz.done||false;
+
+    if(done){
+      /* DONE STATE — compact, green card */
+      h+='<div style="background:#3ab86a18;border:1.5px solid #3ab86a55;border-radius:12px;padding:12px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px">';
+      h+='<div style="font-size:20px">'+esc(pz.e||'&#127775;')+'</div>';
+      h+='<div style="flex:1;min-width:0">';
+      h+='<div style="font-weight:700;font-size:14px;color:var(--success)">'+esc(pz.desc||'Pr\u00eamio')+'</div>';
+      h+='<div style="font-size:12px;color:var(--muted);margin-top:2px">'+(selP?'Para: '+esc(selP.name):'—')+' &nbsp;&#183;&nbsp; '+brl(+pz.valor||0)+'</div>';
+      h+='</div>';
+      h+='<div style="display:flex;gap:6px;flex-shrink:0">';
+      h+='<button data-ex-undone="'+i+'" style="background:var(--s2);border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:7px 10px;cursor:pointer;font-size:12px;font-weight:600;font-family:var(--fn)">&#8592; Desfazer</button>';
+      h+='<button data-ex-rem="'+i+'" style="background:#e0484822;border:1px solid #e0484844;color:var(--danger);border-radius:8px;padding:7px 10px;cursor:pointer;font-size:16px">&#10005;</button>';
+      h+='</div>';
+      h+='</div>';
+    } else {
+      /* EDIT STATE */
+      h+='<div style="background:var(--s2);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px">';
+      h+='<div style="display:flex;gap:6px;align-items:center;margin-bottom:10px">';
+      h+='<input class="fi" data-ex-e="'+i+'" value="'+esc(pz.e||'')+'" placeholder="&#127775;" style="width:46px;text-align:center;padding:8px 4px;font-size:20px">';
+      h+='<input class="fi" data-ex-desc="'+i+'" value="'+esc(pz.desc||'')+'" placeholder="Ex: Chip Leader no intervalo..." style="flex:1;padding:8px 10px;font-size:13px">';
+      h+='<input class="fi" type="number" data-ex-val="'+i+'" value="'+esc(String(pz.valor||''))+'" placeholder="R$" style="width:80px;padding:8px 6px;font-size:13px;text-align:right">';
+      h+='<button data-ex-rem="'+i+'" style="background:#e0484822;border:1px solid #e0484844;color:var(--danger);border-radius:8px;padding:8px 10px;cursor:pointer;font-size:16px;flex-shrink:0">&#10005;</button>';
+      h+='</div>';
+      h+='<div style="display:flex;align-items:center;gap:8px">';
+      h+='<span style="font-size:12px;color:var(--muted);flex-shrink:0">Para:</span>';
+      h+='<select class="fi" data-ex-pid="'+i+'" style="flex:1;padding:8px 10px;font-size:13px">';
+      h+='<option value="">Selecione o jogador...</option>';
+      ps.forEach(function(p){h+='<option value="'+p.id+'"'+(pz.pid===p.id?' selected':'')+'>'+esc(p.name)+'</option>';});
+      h+='</select>';
+      if(selP) h+='<div class="av" style="background:'+avBg(selP.id)+';flex-shrink:0">'+ini(selP.name)+'</div>';
+      h+='</div>';
+      /* Feito button */
+      h+='<button data-ex-done="'+i+'" style="width:100%;margin-top:10px;padding:12px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--fn);background:linear-gradient(135deg,var(--success),#1e8a47);color:#fff;border:none">&#10003; Feito</button>';
+      h+='</div>';
+    }
+  });
+
+  h+='<button id="btn-add-extra" style="width:100%;padding:13px;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--fn);background:var(--s2);color:var(--cream);border:1px solid var(--border);margin-top:2px">+ Adicionar Pr&#234;mio Extra</button>';
+  h+='</div>';
+
+  /* ── ACERTO FINAL ── */
+  var prizeMap={};
+  function addToPM(pid,label,val){
+    var player=ps.find(function(p){return p.id===pid;}); if(!player||!val||+val<=0)return;
+    if(!prizeMap[pid]) prizeMap[pid]={nome:player.name,total:0,items:[]};
+    prizeMap[pid].total+=(+val);
+    prizeMap[pid].items.push({label:label,val:+val});
+  }
+  medals.forEach(function(m){
+    if(ap.indexOf(m.place)<0) return;
+    var player=getPlayerAtPlace(m.place);
+    if(player&&pp[m.key]&&+pp[m.key]>0) addToPM(player.id,m.icon+' '+m.label,pp[m.key]);
+  });
+  t.extraPrizes.forEach(function(pz){
+    if(pz.pid&&pz.valor&&+pz.valor>0) addToPM(pz.pid,(pz.e||'&#127775;')+' '+(pz.desc||'Extra'),pz.valor);
+  });
+
+  var relevant=ps.filter(function(p){return prizeMap[p.id]||plyrDebt(p)>0;});
+
+  h+='<div class="sc"><div class="sc-title">&#128179; Acerto Final</div>';
+  h+='<div style="font-size:11px;color:var(--muted);margin-bottom:12px">Pr&#234;mio menos d&#237;vida = o que cada um recebe ou deve</div>';
+
+  if(!relevant.length){
+    h+='<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">Preencha os valores de premia&#231;&#227;o acima para ver o acerto</div>';
+  } else {
+    relevant.forEach(function(p){
+      var pm=prizeMap[p.id]||{total:0,items:[]};
+      var debt=plyrDebt(p);
+      var net=pm.total-debt;
+      var clr=net>0?'var(--success)':net<0?'var(--danger)':'var(--muted)';
+      var label=net>0?'A RECEBER':net<0?'A PAGAR':'QUITADO';
+      h+='<div class="sb" style="margin-bottom:8px;border-color:'+clr+'55;border-width:1.5px">';
+      h+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:'+(pm.items.length||debt>0?'8':'0')+'px">';
+      h+='<div class="av" style="background:'+avBg(p.id)+'">'+ini(p.name)+'</div>';
+      h+='<span style="flex:1;font-weight:700;font-size:15px">'+esc(p.name)+'</span>';
+      h+='<div style="text-align:right">';
+      h+='<div class="mono" style="font-size:20px;font-weight:700;color:'+clr+'">'+(net>0?'+':net<0?'-':'')+brl(Math.abs(net))+'</div>';
+      h+='<div style="font-size:10px;color:'+clr+';font-weight:700;letter-spacing:1px">'+label+'</div>';
+      h+='</div></div>';
+      pm.items.forEach(function(it){
+        h+='<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--success);padding:4px 0;border-top:1px solid var(--border)"><span>'+it.label+'</span><span class="mono">+'+brl(it.val)+'</span></div>';
+      });
+      if(debt>0){
+        h+='<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--danger);padding:4px 0;border-top:1px solid var(--border)"><span>&#128184; D&#237;vida em aberto</span><span class="mono">-'+brl(debt)+'</span></div>';
+      }
+      h+='</div>';
+    });
+  }
+  h+='</div>';
+
+  /* ── DETALHAMENTO ── */
+  h+='<div class="sc"><div class="sc-title">&#128100; Detalhamento por Jogador</div>';
   ps.forEach(function(p){
     var tot=plyrTotal(p),paid=plyrPaid(p),open=tot-paid;
     h+='<div class="sb" style="margin-bottom:6px;border-color:'+(open>0?'var(--danger)44':'var(--border)')+'"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">'+esc(p.name)+'</span><span class="mono tg">'+brl(tot)+'</span></div>'+(open>0?'<div style="font-size:12px;color:var(--danger);margin-top:4px;font-weight:700">Em aberto: '+brl(open)+'</div>':'')+'</div>';
   });
   h+='</div></div>';
+
   document.getElementById('tab-content').innerHTML=h;
+
+  /* ── WIRE ── */
   document.querySelectorAll('[data-finkey]').forEach(function(inp){
+    inp.addEventListener('input',function(){T().financials[this.dataset.finkey]=this.value;save();refreshBal();});
+  });
+
+  /* Fixed place prizes - value input */
+  document.querySelectorAll('[data-pp]').forEach(function(inp){
     inp.addEventListener('input',function(){
-      T().financials[this.dataset.finkey]=this.value;
-      save(); refreshBal();
+      if(!T().placePrizes) T().placePrizes={p1:'',p2:'',p3:'',p4:''};
+      T().placePrizes[this.dataset.pp]=this.value; save();
+    });
+  });
+
+  /* Remove a fixed place */
+  document.querySelectorAll('[data-place-rem]').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      var place=+this.dataset.placeRem;
+      T().activePlaces=T().activePlaces.filter(function(p){return p!==place;});
+      save(); renderFinance();
+    });
+  });
+
+  /* Add back a removed place */
+  document.querySelectorAll('[data-place-add]').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      var place=+this.dataset.placeAdd;
+      if(!T().activePlaces) T().activePlaces=[];
+      if(T().activePlaces.indexOf(place)<0){
+        T().activePlaces.push(place);
+        T().activePlaces.sort(function(a,b){return a-b;});
+      }
+      save(); renderFinance();
+    });
+  });
+
+  /* Extra prizes */
+  document.getElementById('btn-add-extra').addEventListener('click',function(){
+    if(!T().extraPrizes) T().extraPrizes=[];
+    T().extraPrizes.push({e:'⭐',desc:'',valor:'',pid:null,done:false});
+    save(); renderFinance();
+  });
+  document.querySelectorAll('[data-ex-rem]').forEach(function(btn){
+    btn.addEventListener('click',function(){T().extraPrizes.splice(+this.dataset.exRem,1);save();renderFinance();});
+  });
+  document.querySelectorAll('[data-ex-done]').forEach(function(btn){
+    btn.addEventListener('click',function(){T().extraPrizes[+this.dataset.exDone].done=true;save();renderFinance();});
+  });
+  document.querySelectorAll('[data-ex-undone]').forEach(function(btn){
+    btn.addEventListener('click',function(){T().extraPrizes[+this.dataset.exUndone].done=false;save();renderFinance();});
+  });
+  document.querySelectorAll('[data-ex-e]').forEach(function(inp){
+    inp.addEventListener('input',function(){T().extraPrizes[+this.dataset.exE].e=this.value;save();});
+  });
+  document.querySelectorAll('[data-ex-desc]').forEach(function(inp){
+    inp.addEventListener('input',function(){T().extraPrizes[+this.dataset.exDesc].desc=this.value;save();});
+  });
+  document.querySelectorAll('[data-ex-val]').forEach(function(inp){
+    inp.addEventListener('input',function(){T().extraPrizes[+this.dataset.exVal].valor=+this.value||'';save();});
+  });
+  document.querySelectorAll('[data-ex-pid]').forEach(function(sel){
+    sel.addEventListener('change',function(){
+      T().extraPrizes[+this.dataset.exPid].pid=this.value?+this.value:null;
+      save(); renderFinance();
     });
   });
 }
-
-// ═══════════════════════════════════════════
-//  TAB 4 — MELHOR MÃO
-// ═══════════════════════════════════════════
 function renderBestHand() {
   var t=T(); if(!t) return;
   var bh=t.bestHand;
@@ -987,16 +1268,257 @@ function renderConsumption() {
 // ═══════════════════════════════════════════
 //  TAB 8 — CONFIG
 // ═══════════════════════════════════════════
+function exportTournamentFile() {
+  var t=T(); if(!t) return;
+  var obj={
+    fpc_file: true, versao:'1.0',
+    torneio: t.name, data: t.date,
+    dealer: S.dealerName||'?',
+    exportadoEm: new Date().toISOString(),
+    configuracoes: t.settings,
+    jogadores: t.players.map(function(p){
+      return {
+        nome:p.name, buyInPaid:p.buyInPaid,
+        rebuys:p.rebuys, rebuysPaid:p.rebuysPaid,
+        addon:p.addon, addonPaid:p.addonPaid,
+        eliminated:p.eliminated, drinks:p.drinks, drinksPaid:p.drinksPaid
+      };
+    }),
+    eventos: t.events,
+    rankingComHorario: (function(){
+      var total=t.players.length;
+      return t.ranking.map(function(pid){
+        var p=t.players.find(function(x){return x.id===pid;});
+        var evs=t.events.filter(function(e){return e.type==='final_elim'&&e.data&&e.data.pid===pid;});
+        var at=evs.length?evs[evs.length-1].at:0;
+        var ts=evs.length?evs[evs.length-1].ts:'';
+        return {nome:p?p.name:'?', at:at, ts:ts};
+      });
+    })(),
+    melhorMao: t.bestHand||null,
+    placePrizes: t.placePrizes||{},
+    extraPrizes: t.extraPrizes||[],
+    activePlaces: t.activePlaces||[1,2,3,4]
+  };
+  var blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  var safe=(t.name||'torneio').replace(/[^a-z0-9]/gi,'_').toLowerCase();
+  a.href=url; a.download='FPC_'+safe+'_'+(S.dealerName||'dealer')+'.json';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+function importTournamentFile(file) {
+  if(!file) return;
+  var reader=new FileReader();
+  reader.onload=function(e){
+    try {
+      var obj=JSON.parse(e.target.result);
+      if(!obj.fpc_file){alert('Arquivo inv\u00e1lido. Use um arquivo exportado pelo FPC Manager.');return;}
+      mergeTournament(obj);
+    } catch(ex){alert('Erro ao ler arquivo: '+ex.message);}
+  };
+  reader.readAsText(file);
+}
+
+function mergeTournament(ext) {
+  var t=T(); if(!t) return;
+  var log=[];
+  var extDealer=ext.dealer||'?';
+
+  /* ── POKER HAND RANKINGS (lower index = stronger) ── */
+  var HAND_RANK=['Royal Flush','Straight Flush','Quadra','Full House','Flush','Sequ\u00eancia','Trinca','Dois Pares','Par'];
+
+  /* ── JOGADORES: match by name, SUM everything ── */
+  ext.jogadores.forEach(function(ep){
+    var nameLow=ep.nome.toLowerCase();
+    var local=t.players.find(function(p){return p.name.toLowerCase()===nameLow;});
+    if(!local){
+      log.push('\u26a0\ufe0f Jogador n\u00e3o encontrado localmente: '+ep.nome);
+      return;
+    }
+    /* Buy-in: if either paid = paid */
+    if(ep.buyInPaid && !local.buyInPaid){ local.buyInPaid=true; log.push('\u2705 Buy-in pago: '+local.name); }
+
+    /* Rebuys: SUM */
+    if((ep.rebuys.common||0)>0){
+      local.rebuys.common+=(ep.rebuys.common||0);
+      log.push('+ '+ep.rebuys.common+' re-buy(s) comum: '+local.name);
+    }
+    if((ep.rebuys.bonus||0)>0){
+      local.rebuys.bonus+=(ep.rebuys.bonus||0);
+      log.push('+ '+ep.rebuys.bonus+' re-buy(s) b\u00f4nus: '+local.name);
+    }
+
+    /* Payments: OR */
+    if(ep.rebuysPaid&&ep.rebuysPaid.common) local.rebuysPaid.common=true;
+    if(ep.rebuysPaid&&ep.rebuysPaid.bonus)  local.rebuysPaid.bonus=true;
+
+    /* Add-on: OR (if either registered, player took it) */
+    if(ep.addon && !local.addon){ local.addon=true; log.push('+ Add-on: '+local.name); }
+    if(ep.addonPaid) local.addonPaid=true;
+
+    /* Consumação: SUM quantities */
+    Object.keys(ep.drinks||{}).forEach(function(iid){
+      if((ep.drinks[iid]||0)>0){
+        local.drinks[iid]=(local.drinks[iid]||0)+(ep.drinks[iid]||0);
+      }
+    });
+    if(ep.drinksPaid) local.drinksPaid=true;
+  });
+
+  /* ── EVENTOS: merge kills avoiding duplicates ── */
+  /* Only import kill events — other events are derived from player state */
+  var existingKills=t.events.filter(function(ev){return ev.type==='kill';});
+
+  var killsAdded=0;
+  (ext.eventos||[]).filter(function(ev){return ev.type==='kill';}).forEach(function(ev){
+    /* Duplicate check: same predator + same prey + within 120s */
+    var isDup=existingKills.some(function(local){
+      if(!ev.data||!local.data) return false;
+      var samePred=(local.data.predName||'').toLowerCase()===(ev.data.predName||'').toLowerCase();
+      var samePrey=(local.data.preyName||'').toLowerCase()===(ev.data.preyName||'').toLowerCase();
+      var dt=Math.abs((local.at||0)-(ev.at||0));
+      return samePred && samePrey && dt<120000;
+    });
+    if(!isDup){
+      var newEv=JSON.parse(JSON.stringify(ev));
+      newEv.dealer=extDealer;
+      t.events.push(newEv);
+      existingKills.push(newEv);
+      killsAdded++;
+    }
+  });
+  if(killsAdded>0) log.push('+ '+killsAdded+' kill(s) adicionado(s)');
+
+  /* ── RANKING POR HORÁRIO ── */
+  /*
+   * Logic: collect ALL final_elim events from both dealers.
+   * Each event has a player name + timestamp (at).
+   * If two events refer to the same player → same elimination → keep earliest timestamp.
+   * Sort ALL eliminations by timestamp ascending → first out = last place (highest number).
+   * The player NOT in the elimination list = winner (1st place).
+   */
+  var elimMap={}; /* key: nome.toLowerCase() → {nome, at, ts} */
+
+  /* From local events */
+  t.events.filter(function(ev){return ev.type==='final_elim';}).forEach(function(ev){
+    var nome=(ev.data&&ev.data.name)||'';
+    if(!nome) return;
+    var key=nome.toLowerCase();
+    /* If already exists, keep the EARLIEST timestamp (first registered = earlier event) */
+    if(!elimMap[key] || ev.at < elimMap[key].at){
+      elimMap[key]={nome:nome, at:ev.at||0, ts:ev.ts||''};
+    }
+  });
+
+  /* From external ranking (has timestamps) */
+  (ext.rankingComHorario||[]).forEach(function(er){
+    var key=er.nome.toLowerCase();
+    if(!elimMap[key]){
+      elimMap[key]={nome:er.nome, at:er.at||0, ts:er.ts||''};
+    } else if(er.at && er.at < elimMap[key].at){
+      /* External has earlier timestamp — trust it */
+      elimMap[key].at=er.at;
+      elimMap[key].ts=er.ts||elimMap[key].ts;
+    }
+  });
+
+  /* Sort by timestamp ascending: first eliminated = highest place number */
+  var sortedElims=Object.values(elimMap).sort(function(a,b){return a.at-b.at;});
+
+  /* Rebuild t.ranking (array of pids, first = first eliminated = last place) */
+  t.ranking=[];
+  sortedElims.forEach(function(elim){
+    var nameLow=elim.nome.toLowerCase();
+    var p=t.players.find(function(x){return x.name.toLowerCase()===nameLow;});
+    if(p && t.ranking.indexOf(p.id)<0){
+      t.ranking.push(p.id);
+      p.eliminated=true;
+    }
+  });
+
+  var winner=t.players.find(function(p){return t.ranking.indexOf(p.id)<0;});
+  log.push('\ud83c\udfc6 Ranking recalculado por hor\u00e1rio ('+sortedElims.length+' elimina\u00e7\u00f5es)');
+  if(winner) log.push('   Campe\u00e3o: '+winner.name);
+
+  /* Show ranking summary */
+  var total=t.players.length;
+  sortedElims.forEach(function(elim,i){
+    var place=total-i;
+    log.push('   '+place+'\u00ba '+elim.nome+' (\u23f0 '+( elim.ts||'??:??')+')');
+  });
+
+  /* ── MELHOR MÃO: compare by poker rules ── */
+  if(ext.melhorMao){
+    if(!t.bestHand){
+      t.bestHand=ext.melhorMao;
+      log.push('\u2660\ufe0f Melhor m\u00e3o importada: '+ext.melhorMao.handType+' ('+ext.melhorMao.playerName+')');
+    } else {
+      var localIdx=HAND_RANK.indexOf(t.bestHand.handType);
+      var extIdx=HAND_RANK.indexOf(ext.melhorMao.handType);
+      if(localIdx<0) localIdx=99;
+      if(extIdx<0)   extIdx=99;
+      if(extIdx < localIdx){
+        /* External hand is stronger */
+        t.bestHand=ext.melhorMao;
+        log.push('\u2660\ufe0f Melhor m\u00e3o atualizada: '+ext.melhorMao.handType+' ('+ext.melhorMao.playerName+') \u2014 m\u00e3o mais forte');
+      } else {
+        log.push('\u2660\ufe0f Melhor m\u00e3o mantida: '+t.bestHand.handType+' ('+t.bestHand.playerName+')');
+      }
+    }
+  }
+
+  save();
+
+  /* ── RESULT ALERT ── */
+  var msg='\u2705 Mesclado com sucesso!\n';
+  msg+='Dealer: '+extDealer+' | Data: '+(ext.data||'?')+'\n';
+  msg+='\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n';
+  msg+=log.join('\n');
+  alert(msg);
+  renderSettings();
+}
+
 function renderSettings() {
   var t=T(); if(!t) return;
   var ids=Object.keys(S.tournaments).sort(function(a,b){
     return S.tournaments[b].createdAt>S.tournaments[a].createdAt?1:-1;
   });
   var h='<div class="pad">';
+
+  /* ── DEALER ── */
   h+='<div class="sc"><div class="sc-title">&#128100; Dealer</div>';
   h+='<div class="fl">Seu nome</div>';
-  h+='<input class="fi" id="set-dealer" value="'+esc(S.dealerName)+'" placeholder="ex: Denis, Matheus...">';
+  h+='<input class="fi" id="set-dealer" value="'+esc(S.dealerName)+'" placeholder="ex: Denis, Alysson...">';
   h+='</div>';
+
+  /* ── SYNC ENTRE DEALERS ── */
+  h+='<div class="sc">';
+  h+='<div class="sc-title">&#128257; Sincronizar com Outro Dealer</div>';
+  h+='<p style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6">Exporte o arquivo do seu torneio e mande para o outro dealer. Ele importa e os dados se mesclam automaticamente — rebuys, kills, classificação e tudo mais.</p>';
+
+  /* Export */
+  h+='<button id="btn-exp-file" style="width:100%;padding:15px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--fn);background:linear-gradient(135deg,var(--info),#2255b0);color:#fff;border:none;margin-bottom:10px">';
+  h+='&#128229; Exportar meu arquivo — '+esc(S.dealerName||'Dealer')+'</button>';
+
+  /* Import */
+  h+='<label style="display:block;width:100%;padding:15px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--fn);background:var(--s2);color:var(--cream);border:1px solid var(--border);text-align:center;box-sizing:border-box">';
+  h+='&#128228; Importar arquivo do outro dealer';
+  h+='<input type="file" id="imp-file" accept=".json" style="display:none"></label>';
+
+  h+='<div style="margin-top:12px;padding:12px;background:var(--s2);border-radius:10px;border:1px solid var(--border)">';
+  h+='<div style="font-size:11px;color:var(--gold);font-weight:700;margin-bottom:6px">&#128161; Como funciona:</div>';
+  h+='<div style="font-size:12px;color:var(--muted);line-height:1.7">';
+  h+='1. Cada dealer toca em <strong style="color:var(--cream)">Exportar</strong> e manda o arquivo no WhatsApp<br>';
+  h+='2. Cada um abre o arquivo recebido e toca em <strong style="color:var(--cream)">Importar</strong><br>';
+  h+='3. O app mescla tudo: rebuys somados, kills unidos, classifica&#231;&#227;o pelo hor&#225;rio de elimina&#231;&#227;o<br>';
+  h+='4. Resultado final id&#234;ntico nos dois celulares &#10003;';
+  h+='</div></div>';
+  h+='</div>';
+
+  /* ── TORNEIO ATUAL ── */
   h+='<div class="sc"><div class="sc-title">&#127183; Torneio Atual</div>';
   h+='<div style="background:var(--s2);border:1px solid var(--gold)44;border-radius:10px;padding:12px;margin-bottom:14px">';
   h+='<div style="font-weight:700;font-size:15px;color:var(--gold)">'+esc(t.name)+'</div>';
@@ -1004,8 +1526,10 @@ function renderSettings() {
   h+='</div>';
   h+='<button id="btn-del-cur" style="background:#e0484822;border:1px solid #e0484844;color:var(--danger);border-radius:10px;padding:10px;width:100%;cursor:pointer;font-weight:700;font-family:var(--fn);font-size:13px">&#128465; Excluir Torneio Atual</button>';
   h+='</div>';
+
+  /* ── TODOS OS TORNEIOS ── */
   h+='<div class="sc"><div class="sc-title">&#128193; Todos os Torneios</div>';
-  h+='<p style="font-size:12px;color:var(--muted);margin-bottom:14px">Toque para trocar de torneio sem perder o progresso de nenhum.</p>';
+  h+='<p style="font-size:12px;color:var(--muted);margin-bottom:14px">Toque para trocar de torneio sem perder o progresso.</p>';
   ids.forEach(function(id){
     var tr=S.tournaments[id], cur=id===S.activeId;
     h+='<div class="str'+(cur?' cur':'')+'" data-switch="'+(cur?'':id)+'">';
@@ -1017,28 +1541,29 @@ function renderSettings() {
   });
   h+='<button class="btn-gold" id="btn-new-from-set" style="width:100%;margin-top:12px;padding:14px">+ Novo Torneio</button>';
   h+='</div></div>';
+
   document.getElementById('tab-content').innerHTML=h;
+
   document.getElementById('set-dealer').addEventListener('input',function(){S.dealerName=this.value;save();updateHeader();});
+
+  document.getElementById('btn-exp-file').addEventListener('click',function(){exportTournamentFile();});
+
+  document.getElementById('imp-file').addEventListener('change',function(){
+    if(this.files&&this.files[0]) importTournamentFile(this.files[0]);
+  });
+
   document.getElementById('btn-del-cur').addEventListener('click',function(){
     if(!confirm('Apagar este torneio?')) return;
-    var id=S.activeId;
-    var rem=Object.keys(S.tournaments).filter(function(k){return k!==id;});
+    var id=S.activeId, rem=Object.keys(S.tournaments).filter(function(k){return k!==id;});
     delete S.tournaments[id]; save();
     if(rem.length){S.activeId=rem[0];updateHeader();setTab(0);} else goHome();
   });
   document.getElementById('btn-new-from-set').addEventListener('click',function(){openNewTournamentModal();});
   document.querySelectorAll('[data-switch]').forEach(function(el){
     if(!el.dataset.switch) return;
-    el.addEventListener('click',function(){
-      S.activeId=this.dataset.switch; predStep=null; editCons=false;
-      updateHeader(); setTab(0);
-    });
+    el.addEventListener('click',function(){S.activeId=this.dataset.switch;predStep=null;editCons=false;updateHeader();setTab(0);});
   });
 }
-
-// ═══════════════════════════════════════════
-//  NAVIGATION
-// ═══════════════════════════════════════════
 var RENDERERS=[renderTimer,renderSetup,renderRebuys,renderFinance,renderBestHand,renderPredator,renderRanking,renderConsumption,renderSettings];
 function setTab(n) {
   S.tab=n;
@@ -1130,39 +1655,228 @@ function closeModal() { document.getElementById('modal-bg').classList.add('hidde
 // ═══════════════════════════════════════════
 //  EXPORT
 // ═══════════════════════════════════════════
-function openExport() {
-  var t=T(); if(!t) return;
-  var lines=['FPC MANAGER - LOG DO TORNEIO',
-    'Torneio: '+t.name, 'Data: '+t.date, 'Dealer: '+(S.dealerName||'N/A'),
-    'Jogadores: '+t.players.map(function(p){return p.name;}).join(', '),
-    '---', 'EVENTOS ('+t.events.length+'):', ''];
-  t.events.slice().sort(function(a,b){return a.at-b.at;}).forEach(function(ev){
-    var d='';
-    switch(ev.type){
-      case 'rebuy_common': d='RE-BUY COMUM x'+ev.data.count+' - '+ev.data.name; break;
-      case 'rebuy_bonus':  d='RE-BUY BONUS x'+ev.data.count+' - '+ev.data.name; break;
-      case 'addon':        d='ADD-ON - '+ev.data.name+' ('+(ev.data.taken?'PEGOU':'DEVOLVEU')+')'; break;
-      case 'kill':         d='KILL - '+ev.data.predName+' eliminou '+ev.data.preyName; break;
-      case 'final_elim':   d='RANKING - '+ev.data.name+' -> '+ev.data.place+'o lugar'; break;
-      case 'best_hand':    d='MELHOR MAO - '+ev.data.playerName+': '+ev.data.handType; break;
-      default:             d=ev.type;
-    }
-    lines.push(ev.ts+' | '+d);
-  });
-  lines.push('','---');
-  if(t.ranking.length){
-    lines.push('CLASSIFICACAO FINAL:');
-    var total=t.players.length;
-    t.ranking.slice().reverse().forEach(function(id){
-      var p=t.players.find(function(x){return x.id===id;});
-      var place=total-t.ranking.indexOf(id);
-      lines.push('  '+place+'o - '+(p?p.name:''));
+function buildWppText() {
+  var t=T(); if(!t) return '';
+  var lines=[];
+  var line = function(s){ lines.push(s===undefined?'':s); };
+  var cfg=t.settings, ps=t.players, its=t.items;
+
+  line('\u2660\ufe0f *FPC \u2014 '+t.name+'*');
+  line('\ud83d\udcc5 '+t.date+' | Dealer: '+(S.dealerName||'?'));
+  line('\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500');
+
+  /* Jogadores */
+  line('\ud83d\udc65 *Jogadores ('+ps.length+'):* '+ps.map(function(p){return p.name;}).join(', '));
+  line('');
+
+  /* Financeiro geral */
+  var totBI=ps.filter(function(p){return p.buyInPaid;}).length*cfg.buyIn;
+  var totRC=ps.reduce(function(s,p){return s+p.rebuys.common;},0);
+  var totRB=ps.reduce(function(s,p){return s+p.rebuys.bonus;},0);
+  var totAO=ps.filter(function(p){return p.addon&&p.addonPaid;}).length*cfg.addonCost;
+  var totDR=ps.reduce(function(s,p){return s+its.reduce(function(ss,it){return ss+(p.drinks[it.id]||0)*it.p;},0);},0);
+  var totRev=totBI+totRC*cfg.rebuyCost+totRB*cfg.rebuyBonusCost+totAO+totDR;
+  line('\ud83d\udcb0 *Financeiro Geral:*');
+  line('  Buy-ins: '+brl(totBI)+' ('+ps.filter(function(p){return p.buyInPaid;}).length+')');
+  if(totRC>0) line('  Re-buys Comuns: '+totRC+'\u00d7 = '+brl(totRC*cfg.rebuyCost));
+  if(totRB>0) line('  Re-buys B\u00f4nus: '+totRB+'\u00d7 = '+brl(totRB*cfg.rebuyBonusCost));
+  if(totAO>0) line('  Add-ons: '+brl(totAO));
+  if(totDR>0) line('  Consuma\u00e7\u00e3o total: '+brl(totDR));
+  line('  *TOTAL: '+brl(totRev)+'*');
+  line('');
+
+  /* Consumação individual — sempre mostra se houver itens */
+  var alguemBebeu=ps.some(function(p){return Object.keys(p.drinks).length>0;});
+  if(alguemBebeu){
+    line('\ud83c\udf7a *Consuma\u00e7\u00e3o por pessoa:*');
+    ps.forEach(function(p){
+      var itens=its.filter(function(it){return p.drinks[it.id]&&p.drinks[it.id]>0;});
+      if(!itens.length) return;
+      var totalP=itens.reduce(function(s,it){return s+(p.drinks[it.id]||0)*it.p;},0);
+      var detalhe=itens.map(function(it){return it.e+' '+it.n+' '+p.drinks[it.id]+'\u00d7';}).join(', ');
+      var pago=p.drinksPaid?' \u2705':' \u274c';
+      line('  \u2022 *'+p.name+'*: '+brl(totalP)+pago);
+      line('    '+detalhe);
     });
-    var win=t.players.find(function(p){return t.ranking.indexOf(p.id)<0;});
-    if(win) lines.push('  1o - '+win.name+' CAMPEAO');
+    line('');
   }
-  lines.push('---','Gerado: '+new Date().toLocaleString('pt-BR'),'FPC Manager - Fundadores Poker Club');
-  document.getElementById('exp-txt').textContent=lines.join('\n');
+
+  /* Em aberto */
+  var aberto=ps.filter(function(p){
+    var tot=cfg.buyIn+p.rebuys.common*cfg.rebuyCost+p.rebuys.bonus*cfg.rebuyBonusCost+(p.addon?cfg.addonCost:0)+its.reduce(function(s,it){return s+(p.drinks[it.id]||0)*it.p;},0);
+    var paid=(p.buyInPaid?cfg.buyIn:0)+(p.rebuysPaid.common?p.rebuys.common*cfg.rebuyCost:0)+(p.rebuysPaid.bonus?p.rebuys.bonus*cfg.rebuyBonusCost:0)+(p.addonPaid?cfg.addonCost:0)+(p.drinksPaid?its.reduce(function(s,it){return s+(p.drinks[it.id]||0)*it.p;},0):0);
+    return paid<tot;
+  });
+  if(aberto.length){
+    line('\u26a0\ufe0f *Em aberto:*');
+    aberto.forEach(function(p){
+      var tot=cfg.buyIn+p.rebuys.common*cfg.rebuyCost+p.rebuys.bonus*cfg.rebuyBonusCost+(p.addon?cfg.addonCost:0)+its.reduce(function(s,it){return s+(p.drinks[it.id]||0)*it.p;},0);
+      var paid=(p.buyInPaid?cfg.buyIn:0)+(p.rebuysPaid.common?p.rebuys.common*cfg.rebuyCost:0)+(p.rebuysPaid.bonus?p.rebuys.bonus*cfg.rebuyBonusCost:0)+(p.addonPaid?cfg.addonCost:0)+(p.drinksPaid?its.reduce(function(s,it){return s+(p.drinks[it.id]||0)*it.p;},0):0);
+      line('  '+p.name+': '+brl(tot-paid));
+    });
+    line('');
+  }
+
+  /* Premiação e Acerto Final */
+  var hasAnyPrize=false;
+  var wppPrizeMap={};
+  var wppMedals=[
+    {key:'p1',icon:'\ud83e\udd47',label:'1\u00ba Lugar',place:1},
+    {key:'p2',icon:'\ud83e\udd48',label:'2\u00ba Lugar',place:2},
+    {key:'p3',icon:'\ud83e\udd49',label:'3\u00ba Lugar',place:3},
+    {key:'p4',icon:'\ud83c\udfe5',label:'4\u00ba Lugar',place:4}
+  ];
+  function wppGetPlace(place){
+    var rk2=t.ranking,ps2=t.players;
+    if(place===1)return ps2.find(function(p){return rk2.indexOf(p.id)<0;})||null;
+    var rev=rk2.slice().reverse();
+    return ps2.find(function(x){return x.id===rev[place-2];})||null;
+  }
+  function wppAddPrize(pid,label,val){
+    var pl=t.players.find(function(p){return p.id===pid;});if(!pl||!val||+val<=0)return;
+    if(!wppPrizeMap[pid])wppPrizeMap[pid]={nome:pl.name,total:0,items:[]};
+    wppPrizeMap[pid].total+=(+val);
+    wppPrizeMap[pid].items.push(label+': '+brl(+val));
+    hasAnyPrize=true;
+  }
+  var pp2=t.placePrizes||{};
+  wppMedals.forEach(function(m){var pl=wppGetPlace(m.place);if(pl&&pp2[m.key]&&+pp2[m.key]>0)wppAddPrize(pl.id,m.icon+' '+m.label,pp2[m.key]);});
+  (t.extraPrizes||[]).forEach(function(pz){if(pz.pid&&pz.valor&&+pz.valor>0)wppAddPrize(pz.pid,(pz.e||'\u2b50')+' '+(pz.desc||'Extra'),pz.valor);});
+
+  if(hasAnyPrize){
+    line('\ud83c\udfc6 *Premia\u00e7\u00e3o:*');
+    wppMedals.forEach(function(m){
+      var pl=wppGetPlace(m.place);
+      var pm=pl?wppPrizeMap[pl.id]:null;
+      if(pm&&pp2[m.key]&&+pp2[m.key]>0) line('  '+m.icon+' '+m.label+': '+brl(+pp2[m.key])+' \u2192 '+pl.name);
+    });
+    (t.extraPrizes||[]).forEach(function(pz){
+      if(pz.pid&&pz.valor&&+pz.valor>0){
+        var pl=t.players.find(function(p){return p.id===pz.pid;});
+        if(pl) line('  '+(pz.e||'\u2b50')+' '+(pz.desc||'Extra')+': '+brl(+pz.valor)+' \u2192 '+pl.name);
+      }
+    });
+    line('');
+    line('\ud83d\udcb3 *Acerto Final:*');
+    t.players.forEach(function(p){
+      var pm=wppPrizeMap[p.id]||{total:0};
+      var debt=plyrDebt(p);
+      var net=pm.total-debt;
+      if(net===0&&pm.total===0)return;
+      var status=net>0?'\u2705 a receber':net<0?'\u274c a pagar':'\u2705 quitado';
+      line('  \u2022 '+p.name+': '+(net>=0?'+':'')+brl(net)+' '+status);
+    });
+    line('');
+  }
+
+  if(false){
+  }
+
+    /* Kills */
+  var kills=t.events.filter(function(ev){return ev.type==='kill';});
+  if(kills.length){
+    line('\ud83d\udc80 *Kills:*');
+    var kc={};
+    kills.forEach(function(ev){kc[ev.data.predName]=(kc[ev.data.predName]||0)+1;});
+    Object.keys(kc).sort(function(a,b){return kc[b]-kc[a];}).forEach(function(n){
+      line('  '+n+': '+kc[n]+' kill'+(kc[n]>1?'s':''));
+    });
+    line('');
+  }
+
+  /* Melhor mão */
+  if(t.bestHand){
+    var bh=t.bestHand;
+    var desc=bh.handType;
+    if(bh.rank1) desc+=' ('+bh.rank1+(bh.rank2?' & '+bh.rank2:'')+')';
+    if(bh.notes) desc+=' \u2014 '+bh.notes;
+    line('\u2660\ufe0f *Melhor M\u00e3o:* '+bh.playerName+': '+desc);
+    line('');
+  }
+
+  /* Classificação */
+  line('\ud83c\udfc6 *Classifica\u00e7\u00e3o \u2014 Dealer: '+(S.dealerName||'?')+':*');
+  var total=t.players.length;
+  var winner=t.players.find(function(p){return t.ranking.indexOf(p.id)<0;});
+  if(winner) line('  1\u00ba \ud83c\udfc6 '+winner.name);
+  t.ranking.slice().reverse().forEach(function(id){
+    var p=t.players.find(function(x){return x.id===id;});
+    var place=total-t.ranking.indexOf(id);
+    var evs=t.events.filter(function(e){return e.type==='final_elim'&&e.data.pid===id;});
+    var hora=evs.length?evs[evs.length-1].ts:'??:??';
+    if(place>1) line('  '+place+'\u00ba '+(p?p.name:'?')+' \u23f0 '+hora);
+  });
+  line('');
+  line('\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500');
+  line('FPC Manager | '+new Date().toLocaleString('pt-BR'));
+  return lines.join('\n');
+}
+function buildJsonExport() {
+  var t=T(); if(!t) return '';
+  var obj={
+    fpc_export:true, versao:'1.0',
+    torneio:t.name, data:t.date,
+    dealer:S.dealerName||'?',
+    geradoEm:new Date().toISOString(),
+    configuracoes:t.settings,
+    jogadores:t.players.map(function(p){
+      return{id:p.id,nome:p.name,
+        buyIn:{valor:t.settings.buyIn,pago:p.buyInPaid},
+        rebuys:{comum:p.rebuys.common,bonus:p.rebuys.bonus,pago:p.rebuysPaid},
+        addon:{pegou:p.addon,pago:p.addonPaid},
+        drinks:p.drinks,drinksPago:p.drinksPaid};
+    }),
+    eventos:t.events.map(function(ev){
+      return{ts:ev.ts,at:ev.at,tipo:ev.type,dealer:ev.dealer||S.dealerName||'?',dados:ev.data};
+    }),
+    classificacao:(function(){
+      var total=t.players.length;
+      var res=t.ranking.slice().reverse().map(function(id){
+        var p=t.players.find(function(x){return x.id===id;});
+        var place=total-t.ranking.indexOf(id);
+        var evs=t.events.filter(function(e){return e.type==='final_elim'&&e.data.pid===id;});
+        return{lugar:place,nome:p?p.name:'?',horario:evs.length?evs[evs.length-1].ts:'',pid:id};
+      });
+      var winner=t.players.find(function(p){return t.ranking.indexOf(p.id)<0;});
+      if(winner) res.unshift({lugar:1,nome:winner.name,horario:'',pid:winner.id});
+      return res;
+    })(),
+    melhorMao:t.bestHand||null,
+    financeiro:t.financials
+  };
+  return JSON.stringify(obj,null,2);
+}
+
+var _expTab='wpp';
+
+function switchExpTab(tab) {
+  _expTab=tab;
+  var wBtn=document.getElementById('exp-tab-wpp');
+  var jBtn=document.getElementById('exp-tab-json');
+  var desc=document.getElementById('exp-desc');
+  if(tab==='wpp'){
+    if(wBtn){wBtn.style.background='var(--success)';wBtn.style.color='#fff';wBtn.style.border='none';}
+    if(jBtn){jBtn.style.background='var(--s2)';jBtn.style.color='var(--muted)';jBtn.style.border='1px solid var(--border)';}
+    if(desc) desc.textContent='Texto limpo \u2014 compare com o Alysson antes de me mandar.';
+    document.getElementById('exp-txt').textContent=buildWppText();
+  } else {
+    if(jBtn){jBtn.style.background='var(--info)';jBtn.style.color='#fff';jBtn.style.border='none';}
+    if(wBtn){wBtn.style.background='var(--s2)';wBtn.style.color='var(--muted)';wBtn.style.border='1px solid var(--border)';}
+    if(desc) desc.textContent='Cole aqui no Claude junto com o do Alysson. Eu junto e gero o relat\u00f3rio oficial.';
+    document.getElementById('exp-txt').textContent=buildJsonExport();
+  }
+}
+
+function openExport() {
+  _expTab='wpp';
+  var t=T(); if(!t) return;
+  var wBtn=document.getElementById('exp-tab-wpp');
+  var jBtn=document.getElementById('exp-tab-json');
+  var desc=document.getElementById('exp-desc');
+  if(wBtn){wBtn.style.background='var(--success)';wBtn.style.color='#fff';wBtn.style.border='none';}
+  if(jBtn){jBtn.style.background='var(--s2)';jBtn.style.color='var(--muted)';jBtn.style.border='1px solid var(--border)';}
+  if(desc) desc.textContent='Texto limpo \u2014 compare com o Alysson antes de me mandar.';
+  document.getElementById('exp-txt').textContent=buildWppText();
   document.getElementById('exp-bg').classList.remove('hidden');
 }
 function closeExport() { document.getElementById('exp-bg').classList.add('hidden'); }
@@ -1194,9 +1908,9 @@ document.addEventListener('DOMContentLoaded',function(){
   });
   document.getElementById('btn-home').addEventListener('click',goHome);
   document.getElementById('btn-export').addEventListener('click',openExport);
-  document.getElementById('btn-close-exp').addEventListener('click',closeExport);
-  document.getElementById('btn-close-exp2').addEventListener('click',closeExport);
-  document.getElementById('btn-copy-exp').addEventListener('click',copyExport);
+  if(document.getElementById('btn-close-exp'))document.getElementById('btn-close-exp').addEventListener('click',closeExport);
+  if(document.getElementById('btn-close-exp2'))document.getElementById('btn-close-exp2').addEventListener('click',closeExport);
+  if(document.getElementById('btn-copy-exp'))document.getElementById('btn-copy-exp').addEventListener('click',copyExport);
   document.getElementById('modal-bg').addEventListener('click',function(e){
     if(e.target===this) closeModal();
   });
