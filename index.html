@@ -673,7 +673,7 @@ function calcTotals() {
   var totRC=ps.reduce(function(s,p){return s+p.rebuys.common;},0);
   var totRB=ps.reduce(function(s,p){return s+p.rebuys.bonus;},0);
   var totRV=totRC*cfg.rebuyCost+totRB*cfg.rebuyBonusCost;
-  var totAO=ps.filter(function(p){return p.addon&&p.addonPaid;}).length*cfg.addonCost;
+  var totAO=ps.filter(function(p){return p.addon;}).length*cfg.addonCost;
   var totDR=ps.reduce(function(s,p){return s+its.reduce(function(ss,it){return ss+(p.drinks[it.id]||0)*it.p;},0);},0);
   return {totBI:totBI,totRC:totRC,totRB:totRB,totRV:totRV,totAO:totAO,totDR:totDR,totRev:totBI+totRV+totAO+totDR};
 }
@@ -885,13 +885,23 @@ function renderFinance() {
   h+='<div class="sc"><div class="sc-title">&#128100; Detalhamento por Jogador</div>';
   ps.forEach(function(p){
     var tot=plyrTotal(p),paid=plyrPaid(p),open=tot-paid;
-    h+='<div class="sb" style="margin-bottom:6px;border-color:'+(open>0?'var(--danger)44':'var(--border)')+'"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">'+esc(p.name)+'</span><span class="mono tg">'+brl(tot)+'</span></div>'+(open>0?'<div style="font-size:12px;color:var(--danger);margin-top:4px;font-weight:700">Em aberto: '+brl(open)+'</div>':'')+'</div>';
+    h+='<div class="sb" style="margin-bottom:6px;border-color:'+(open>0?'var(--danger)44':'var(--border)')+'">';
+    h+='<div style="display:flex;justify-content:space-between;align-items:center">';
+    h+='<div style="display:flex;align-items:center;gap:8px"><div class="av" style="background:'+avBg(p.id)+'">'+ini(p.name)+'</div><span style="font-weight:600">'+esc(p.name)+'</span></div>';
+    h+='<div style="display:flex;align-items:center;gap:8px"><span class="mono tg" style="font-size:15px">'+brl(tot)+'</span>';
+    h+='<button data-bill="'+p.id+'" style="background:var(--s2);border:1px solid var(--gold)55;color:var(--gold);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:11px;font-weight:700;font-family:var(--fn)">&#128203; Comanda</button></div>';
+    h+='</div>';
+    if(open>0) h+='<div style="font-size:12px;color:var(--danger);margin-top:6px;font-weight:700">Em aberto: '+brl(open)+'</div>';
+    h+='</div>';
   });
   h+='</div></div>';
 
   document.getElementById('tab-content').innerHTML=h;
 
   /* ── WIRE ── */
+  document.querySelectorAll('[data-bill]').forEach(function(btn){
+    btn.addEventListener('click',function(){showPlayerBillModal(+this.dataset.bill);});
+  });
   document.querySelectorAll('[data-finkey]').forEach(function(inp){
     inp.addEventListener('input',function(){T().financials[this.dataset.finkey]=this.value;save();refreshBal();});
   });
@@ -1756,7 +1766,7 @@ function buildWppText() {
   var totBI=ps.filter(function(p){return p.buyInPaid;}).length*cfg.buyIn;
   var totRC=ps.reduce(function(s,p){return s+p.rebuys.common;},0);
   var totRB=ps.reduce(function(s,p){return s+p.rebuys.bonus;},0);
-  var totAO=ps.filter(function(p){return p.addon&&p.addonPaid;}).length*cfg.addonCost;
+  var totAO=ps.filter(function(p){return p.addon;}).length*cfg.addonCost;
   var totDR=ps.reduce(function(s,p){return s+its.reduce(function(ss,it){return ss+(p.drinks[it.id]||0)*it.p;},0);},0);
   var totRev=totBI+totRC*cfg.rebuyCost+totRB*cfg.rebuyBonusCost+totAO+totDR;
   line('\ud83d\udcb0 *Financeiro Geral:*');
@@ -1894,6 +1904,128 @@ function buildWppText() {
   line('FPC Manager | '+new Date().toLocaleString('pt-BR'));
   return lines.join('\n');
 }
+function buildPlayerBill(pid) {
+  var t=T(); if(!t) return '';
+  var p=t.players.find(function(x){return x.id===pid;});
+  if(!p) return '';
+  var cfg=t.settings, its=t.items;
+  var lines=[];
+  var line=function(s){lines.push(s===undefined?'':s);};
+
+  line('\ud83c\udca0 *FPC \u2014 '+t.name+'*');
+  line('\ud83d\udcc5 '+t.date);
+  line('\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500');
+  line('\ud83d\udc64 *'+p.name+'*');
+  line('');
+
+  var total=0;
+
+  /* Buy-in */
+  var bi=cfg.buyIn;
+  line('Buy-in: '+brl(bi)+(p.buyInPaid?' \u2705':' \u274c'));
+  total+=bi;
+
+  /* Rebuys */
+  if(p.rebuys.common>0){
+    var valRC=p.rebuys.common*cfg.rebuyCost;
+    line('Re-buy Comum \u00d7'+p.rebuys.common+': '+brl(valRC)+(p.rebuysPaid.common?' \u2705':' \u274c'));
+    total+=valRC;
+  }
+  if(p.rebuys.bonus>0){
+    var valRB=p.rebuys.bonus*cfg.rebuyBonusCost;
+    line('Re-buy B\u00f4nus \u00d7'+p.rebuys.bonus+': '+brl(valRB)+(p.rebuysPaid.bonus?' \u2705':' \u274c'));
+    total+=valRB;
+  }
+
+  /* Add-on */
+  if(p.addon){
+    var valAO=cfg.addonCost;
+    line('Add-on: '+brl(valAO)+(p.addonPaid?' \u2705':' \u274c'));
+    total+=valAO;
+  }
+
+  /* Consumação */
+  var drinkItems=its.filter(function(it){return p.drinks[it.id]&&p.drinks[it.id]>0;});
+  if(drinkItems.length){
+    var totalDr=0;
+    drinkItems.forEach(function(it){
+      var qty=p.drinks[it.id];
+      var val=qty*it.p;
+      line(it.e+' '+it.n+' \u00d7'+qty+': '+brl(val)+(p.drinksPaid?' \u2705':' \u274c'));
+      totalDr+=val;
+    });
+    total+=totalDr;
+  }
+
+  line('');
+  line('\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500');
+
+  /* Total geral */
+  var paid=(p.buyInPaid?cfg.buyIn:0)
+    +(p.rebuysPaid.common?p.rebuys.common*cfg.rebuyCost:0)
+    +(p.rebuysPaid.bonus?p.rebuys.bonus*cfg.rebuyBonusCost:0)
+    +(p.addonPaid?cfg.addonCost:0)
+    +(p.drinksPaid?drinkItems.reduce(function(s,it){return s+p.drinks[it.id]*it.p;},0):0);
+  var open=total-paid;
+
+  line('*TOTAL: '+brl(total)+'*');
+  if(open>0) line('\u26a0\ufe0f *Em aberto: '+brl(open)+'*');
+  else line('\u2705 Tudo pago!');
+
+  /* Premiação se tiver */
+  var prizeTotal=0, prizeLines=[];
+  if(t.placePrizes){
+    var medals=[{key:'p1',place:1,label:'1\u00ba Lugar'},{key:'p2',place:2,label:'2\u00ba Lugar'},{key:'p3',place:3,label:'3\u00ba Lugar'},{key:'p4',place:4,label:'4\u00ba Lugar'}];
+    var ap=t.activePlaces||[1,2,3,4];
+    medals.forEach(function(m){
+      if(ap.indexOf(m.place)<0) return;
+      var rk=t.ranking, ps2=t.players;
+      var winner=m.place===1?ps2.find(function(x){return rk.indexOf(x.id)<0;}):ps2.find(function(x){return x.id===rk.slice().reverse()[m.place-2];});
+      if(winner&&winner.id===p.id&&t.placePrizes[m.key]&&+t.placePrizes[m.key]>0){
+        prizeTotal+=(+t.placePrizes[m.key]);
+        prizeLines.push('\ud83c\udfc6 '+m.label+': +'+brl(+t.placePrizes[m.key]));
+      }
+    });
+  }
+  (t.extraPrizes||[]).forEach(function(pz){
+    if(pz.pid===p.id&&pz.valor&&+pz.valor>0){
+      prizeTotal+=(+pz.valor);
+      prizeLines.push((pz.e||'\u2b50')+' '+(pz.desc||'Extra')+': +'+brl(+pz.valor));
+    }
+  });
+  if(prizeLines.length){
+    line('');
+    prizeLines.forEach(function(l){line(l);});
+    var net=prizeTotal-open;
+    line('');
+    if(net>=0) line('\ud83d\udcb3 *Saldo final: +'+brl(net)+' a receber*');
+    else line('\ud83d\udcb3 *Saldo final: -'+brl(Math.abs(net))+' a pagar*');
+  }
+
+  line('');
+  line('FPC Manager | '+new Date().toLocaleString('pt-BR'));
+  return lines.join('\n');
+}
+
+function showPlayerBillModal(pid) {
+  var text=buildPlayerBill(pid);
+  if(!text) return;
+  var p=T()&&T().players.find(function(x){return x.id===pid;});
+  document.getElementById('modal-box').innerHTML=
+    '<div class="modal-title">\ud83d\udcf1 Comanda \u2014 '+(p?esc(p.name):'')+'</div>'+
+    '<div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px;font-size:13px;white-space:pre-wrap;word-break:break-word;max-height:55vh;overflow-y:auto;font-family:var(--fm);color:var(--cream);line-height:1.6">'+esc(text)+'</div>'+
+    '<div style="display:flex;gap:8px;margin-top:16px">'+
+    '<button id="m-copy-bill" class="btn-gold" style="flex:1">&#128203; Copiar para WhatsApp</button>'+
+    '<button id="m-close-bill" class="btn-ghost" style="flex:1">Fechar</button>'+
+    '</div>';
+  document.getElementById('modal-bg').classList.remove('hidden');
+  document.getElementById('m-copy-bill').addEventListener('click',function(){
+    if(navigator.clipboard){navigator.clipboard.writeText(text).then(function(){alert('\u2705 Copiado! Cole no WhatsApp.');});}
+    else{var ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);alert('\u2705 Copiado!');}
+  });
+  document.getElementById('m-close-bill').addEventListener('click',closeModal);
+}
+
 function buildJsonExport() {
   var t=T(); if(!t) return '';
   var obj={
