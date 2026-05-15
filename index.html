@@ -687,10 +687,25 @@ function plyrPaid(p) {
   var cfg=t.settings,its=t.items;
   return (p.buyInPaid?cfg.buyIn:0)+(p.rebuysPaid.common?p.rebuys.common*cfg.rebuyCost:0)+(p.rebuysPaid.bonus?p.rebuys.bonus*cfg.rebuyBonusCost:0)+(p.addonPaid?cfg.addonCost:0)+(p.drinksPaid?its.reduce(function(s,it){return s+(p.drinks[it.id]||0)*it.p;},0):0);
 }
+function calcTotalPrizes() {
+  var t=T(); if(!t) return 0;
+  var total=0;
+  var ap=t.activePlaces||[1,2,3,4];
+  var pp=t.placePrizes||{};
+  [{key:'p1',place:1},{key:'p2',place:2},{key:'p3',place:3},{key:'p4',place:4}].forEach(function(m){
+    if(ap.indexOf(m.place)<0) return;
+    if(pp[m.key]&&+pp[m.key]>0) total+=(+pp[m.key]);
+  });
+  (t.extraPrizes||[]).forEach(function(pz){
+    if(pz.valor&&+pz.valor>0) total+=(+pz.valor);
+  });
+  return total;
+}
+
 function refreshBal() {
   var t=T(); if(!t) return;
   var x=calcTotals();
-  var bal=x.totRev-(+t.financials.prizes||0)-(+t.financials.costs||0)-(+t.financials.expenses||0);
+  var bal=x.totRev-calcTotalPrizes()-(+t.financials.costs||0)-(+t.financials.expenses||0);
   var box=document.getElementById('bal-box'),val=document.getElementById('bal-val'),lbl=document.getElementById('bal-lbl');
   if(!box) return;
   box.className='bal '+(bal>=0?'pos':'neg');
@@ -720,7 +735,6 @@ function renderFinance() {
   if(!t.activePlaces) t.activePlaces = [1,2,3,4];
   if(!t.extraPrizes)  t.extraPrizes  = [];
   var x=calcTotals(), cfg=t.settings, ps=t.players, fin=t.financials;
-  var bal=x.totRev-(+fin.prizes||0)-(+fin.costs||0)-(+fin.expenses||0);
 
   /* ── RESUMO ── */
   var h='<div class="pad">';
@@ -734,8 +748,17 @@ function renderFinance() {
   h+='</div></div>';
 
   /* ── DESPESAS ── */
+  var totalPrizes=calcTotalPrizes();
+  var bal=x.totRev-totalPrizes-(+fin.costs||0)-(+fin.expenses||0);
   h+='<div class="sc"><div class="sc-title">&#128184; Despesas</div>';
-  [['Premia&#231;&#227;o total (R$)','prizes'],['Custos operacionais (R$)','costs'],['Outras despesas (R$)','expenses']].forEach(function(pair){
+  /* Premiação total — read-only, auto-calculated */
+  h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">';
+  h+='<div style="flex:1"><div style="font-size:13px;color:var(--muted)">Premia&#231;&#227;o total</div>';
+  h+='<div style="font-size:10px;color:var(--muted);margin-top:1px">calculado autom. dos lugares + extras</div></div>';
+  h+='<div style="background:var(--s3);border:1px solid var(--border);color:var(--gold);border-radius:8px;padding:9px 12px;font-size:14px;font-weight:700;font-family:var(--fm);min-width:90px;text-align:right">'+brl(totalPrizes)+'</div>';
+  h+='</div>';
+  /* Custos e outras despesas — editáveis */
+  [['Custos operacionais (R$)','costs'],['Outras despesas (R$)','expenses']].forEach(function(pair){
     h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="font-size:13px;color:var(--muted);flex:1">'+pair[0]+'</div><input class="fi" type="number" data-finkey="'+pair[1]+'" value="'+fin[pair[1]]+'" style="width:90px;padding:8px 10px;font-size:13px"></div>';
   });
   h+='<div id="bal-box" class="bal '+(bal>=0?'pos':'neg')+'"><span id="bal-lbl" style="font-weight:700;color:'+(bal>=0?'var(--success)':'var(--danger)')+'">Balan&#231;o Final</span><span id="bal-val" class="mono" style="font-size:20px;font-weight:700;color:'+(bal>=0?'var(--success)':'var(--danger)')+'">'+(bal>=0?'+':'')+brl(bal)+'</span></div>';
