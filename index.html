@@ -2021,8 +2021,29 @@ function buildPlayerBill(pid) {
     prizeLines.forEach(function(l){line(l);});
     var net=prizeTotal-open;
     line('');
-    if(net>=0) line('\ud83d\udcb3 *Saldo final: +'+brl(net)+' a receber*');
-    else line('\ud83d\udcb3 *Saldo final: -'+brl(Math.abs(net))+' a pagar*');
+    if(net>=0){
+      line('\ud83d\udcb3 *Saldo final: +'+brl(net)+' a receber*');
+      line('');
+      line('\ud83d\udc47 Mande seu Pix abaixo para pagamento:');
+      line('');
+      line('fundadorespokerclub@gmail.com');
+    } else {
+      line('\ud83d\udcb3 *Saldo final: -'+brl(Math.abs(net))+' a pagar*');
+      line('');
+      line('\u2764\ufe0f Pix para pagamento:');
+      line('');
+      line('fundadorespokerclub@gmail.com');
+    }
+  }
+
+  /* No prizes section — handle pix based on debt */
+  if(!prizeLines.length){
+    if(open>0){
+      line('');
+      line('\u2764\ufe0f Pix para pagamento:');
+      line('');
+      line('fundadorespokerclub@gmail.com');
+    }
   }
 
   line('');
