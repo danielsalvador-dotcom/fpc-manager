@@ -267,7 +267,7 @@ var S = {
 //  STORAGE
 // ═══════════════════════════════════════════
 function save() {
-  try { localStorage.setItem('fpc6', JSON.stringify({t:S.tournaments, d:S.dealerName})); } catch(e) {}
+  try { localStorage.setItem('fpc6', JSON.stringify({t:S.tournaments, d:S.dealerName, bc:S.billConfig})); } catch(e) {}
 }
 function loadData() {
   try {
@@ -669,12 +669,12 @@ function renderRebuys() {
 function calcTotals() {
   var t=T(); if(!t) return {totBI:0,totRV:0,totAO:0,totDR:0,totRev:0,totRC:0,totRB:0};
   var cfg=t.settings,ps=t.players,its=t.items;
-  var totBI=ps.filter(function(p){return p.buyInPaid;}).length*cfg.buyIn;
+  var totBI=ps.length*cfg.buyIn; /* conta todos, pago/aberto é só controle */
   var totRC=ps.reduce(function(s,p){return s+p.rebuys.common;},0);
   var totRB=ps.reduce(function(s,p){return s+p.rebuys.bonus;},0);
   var totRV=totRC*cfg.rebuyCost+totRB*cfg.rebuyBonusCost;
   var totAO=ps.filter(function(p){return p.addon;}).length*cfg.addonCost;
-  var totDR=ps.reduce(function(s,p){return s+its.reduce(function(ss,it){return ss+(p.drinks[it.id]||0)*it.p;},0);},0);
+  var totDR=ps.reduce(function(s,p){return p.drinksPaid?s+its.reduce(function(ss,it){return ss+(p.drinks[it.id]||0)*it.p;},0):s;},0); /* só entra quando pago */
   return {totBI:totBI,totRC:totRC,totRB:totRB,totRV:totRV,totAO:totAO,totDR:totDR,totRev:totBI+totRV+totAO+totDR};
 }
 function plyrTotal(p) {
@@ -1631,6 +1631,27 @@ function renderSettings() {
 
   h+='</div>';
 
+  /* ── COMANDA CONFIG ── */
+  var bc=S.billConfig||{};
+  h+='<div class="sc"><div class="sc-title">&#128203; Configura&#231;&#227;o da Comanda</div>';
+  h+='<p style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.6">Personalize as mensagens que aparecem na comanda de cada jogador.</p>';
+
+  h+='<div style="margin-bottom:12px">';
+  h+='<div class="fl">Mensagem Pix (quando tem a pagar)</div>';
+  h+='<input class="fi" id="cfg-pix-msg" value="'+esc(bc.pixMsg||'\ud83d\udcb8 Pix para pagamento:')+'" placeholder="\ud83d\udcb8 Pix para pagamento:">';
+  h+='</div>';
+
+  h+='<div style="margin-bottom:12px">';
+  h+='<div class="fl">Chave Pix</div>';
+  h+='<input class="fi" id="cfg-pix-key" value="'+esc(bc.pixKey||'fundadorespokerclub@gmail.com')+'" placeholder="email, cpf ou telefone">';
+  h+='</div>';
+
+  h+='<div style="margin-bottom:0">';
+  h+='<div class="fl">Mensagem quando tem a receber</div>';
+  h+='<input class="fi" id="cfg-recv-msg" value="'+esc(bc.recvMsg||'')+'" placeholder="Deixe vazio para n\u00e3o mostrar mensagem">';
+  h+='</div>';
+  h+='</div>';
+
   /* ── TORNEIO ATUAL ── */
   h+='<div class="sc"><div class="sc-title">&#127183; Torneio Atual</div>';
   h+='<div style="background:var(--s2);border:1px solid var(--gold)44;border-radius:10px;padding:12px;margin-bottom:14px">';
@@ -1658,6 +1679,17 @@ function renderSettings() {
   document.getElementById('tab-content').innerHTML=h;
 
   document.getElementById('set-dealer').addEventListener('input',function(){S.dealerName=this.value;save();updateHeader();});
+  ['cfg-pix-msg','cfg-pix-key','cfg-recv-msg'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(!el) return;
+    el.addEventListener('input',function(){
+      if(!S.billConfig) S.billConfig={};
+      if(id==='cfg-pix-msg')  S.billConfig.pixMsg  =this.value;
+      if(id==='cfg-pix-key')  S.billConfig.pixKey  =this.value;
+      if(id==='cfg-recv-msg') S.billConfig.recvMsg =this.value;
+      save();
+    });
+  });
 
   document.getElementById('btn-exp-file').addEventListener('click',function(){exportTournamentFile();});
   if(document.getElementById('btn-undo-merge')){
@@ -1786,11 +1818,11 @@ function buildWppText() {
   line('');
 
   /* Financeiro geral */
-  var totBI=ps.filter(function(p){return p.buyInPaid;}).length*cfg.buyIn;
+  var totBI=ps.length*cfg.buyIn; /* conta todos, pago/aberto é só controle */
   var totRC=ps.reduce(function(s,p){return s+p.rebuys.common;},0);
   var totRB=ps.reduce(function(s,p){return s+p.rebuys.bonus;},0);
   var totAO=ps.filter(function(p){return p.addon;}).length*cfg.addonCost;
-  var totDR=ps.reduce(function(s,p){return s+its.reduce(function(ss,it){return ss+(p.drinks[it.id]||0)*it.p;},0);},0);
+  var totDR=ps.reduce(function(s,p){return p.drinksPaid?s+its.reduce(function(ss,it){return ss+(p.drinks[it.id]||0)*it.p;},0):s;},0); /* só entra quando pago */
   var totRev=totBI+totRC*cfg.rebuyCost+totRB*cfg.rebuyBonusCost+totAO+totDR;
   line('\ud83d\udcb0 *Financeiro Geral:*');
   line('  Buy-ins: '+brl(totBI)+' ('+ps.filter(function(p){return p.buyInPaid;}).length+')');
@@ -2023,16 +2055,15 @@ function buildPlayerBill(pid) {
     line('');
     if(net>=0){
       line('\ud83d\udcb3 *Saldo final: +'+brl(net)+' a receber*');
-      line('');
-      line('\ud83d\udc47 Mande seu Pix abaixo para pagamento:');
-      line('');
-      line('fundadorespokerclub@gmail.com');
+      var cfg4=S.billConfig||{};
+      if(cfg4.recvMsg){line('');line(cfg4.recvMsg);}
     } else {
       line('\ud83d\udcb3 *Saldo final: -'+brl(Math.abs(net))+' a pagar*');
       line('');
-      line('\u2764\ufe0f Pix para pagamento:');
+      var cfg2=S.billConfig||{};
+      line(cfg2.pixMsg||'\ud83d\udcb8 Pix para pagamento:');
       line('');
-      line('fundadorespokerclub@gmail.com');
+      line(cfg2.pixKey||'fundadorespokerclub@gmail.com');
     }
   }
 
@@ -2040,9 +2071,10 @@ function buildPlayerBill(pid) {
   if(!prizeLines.length){
     if(open>0){
       line('');
-      line('\u2764\ufe0f Pix para pagamento:');
+      var cfg3=S.billConfig||{};
+      line(cfg3.pixMsg||'\ud83d\udcb8 Pix para pagamento:');
       line('');
-      line('fundadorespokerclub@gmail.com');
+      line(cfg3.pixKey||'fundadorespokerclub@gmail.com');
     }
   }
 
